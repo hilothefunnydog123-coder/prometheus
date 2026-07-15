@@ -1,7 +1,10 @@
 import { assertServerOnly, type FeatherlessConfig } from "./config";
 import {
   ModelOutputError,
+  ProviderCancelledError,
   ProviderHttpError,
+  ProviderNetworkError,
+  ProviderRateLimitError,
   ProviderTimeoutError,
 } from "./errors";
 
@@ -39,6 +42,8 @@ export interface ChatRequest {
   temperature?: number;
   maxTokens?: number;
   timeoutMs?: number;
+  /** Cancels the provider call when the incoming request is abandoned. */
+  signal?: AbortSignal;
 }
 
 export interface ChatResult {
@@ -60,16 +65,85 @@ interface ProviderResponse {
   }>;
 }
 
+const MAX_PROVIDER_RESPONSE_BYTES = 1024 * 1024;
+const MAX_TOOL_ARGUMENT_BYTES = 256 * 1024;
+
+async function readResponseText(
+  response: Response,
+  maximumBytes: number,
+): Promise<string> {
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (
+    Number.isFinite(declaredLength) &&
+    declaredLength > maximumBytes
+  ) {
+    throw new ModelOutputError("provider response exceeded the size limit");
+  }
+
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maximumBytes) {
+        try {
+          await reader.cancel();
+        } catch {
+          // The size violation remains authoritative if cancellation races.
+        }
+        throw new ModelOutputError("provider response exceeded the size limit");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new ModelOutputError("provider response was not valid UTF-8");
+  }
+}
+
 export async function chatCompletion(
   config: FeatherlessConfig,
   request: ChatRequest,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ChatResult> {
   assertServerOnly();
+  if (request.signal?.aborted) {
+    throw new ProviderCancelledError();
+  }
 
-  const timeoutMs = request.timeoutMs ?? config.timeoutMs;
+  const requestedTimeout = request.timeoutMs ?? config.timeoutMs;
+  const timeoutMs =
+    Number.isFinite(requestedTimeout) && requestedTimeout > 0
+      ? Math.min(requestedTimeout, 120_000)
+      : config.timeoutMs;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const cancelFromCaller = () => controller.abort();
+  if (request.signal?.aborted) {
+    cancelFromCaller();
+  } else {
+    request.signal?.addEventListener("abort", cancelFromCaller, { once: true });
+  }
   const startedAt = Date.now();
 
   const body: Record<string, unknown> = {
@@ -95,9 +169,8 @@ export async function chatCompletion(
     };
   }
 
-  let response: Response;
   try {
-    response = await fetchImpl(`${config.baseUrl}/chat/completions`, {
+    const response = await fetchImpl(`${config.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -106,37 +179,86 @@ export async function chatCompletion(
       body: JSON.stringify(body),
       signal: controller.signal,
     });
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        throw new ProviderRateLimitError();
+      }
+      throw new ProviderHttpError(response.status);
+    }
+
+    const rawResponse = await readResponseText(
+      response,
+      MAX_PROVIDER_RESPONSE_BYTES,
+    );
+    if (rawResponse.trim().length === 0) {
+      throw new ModelOutputError("provider response was empty");
+    }
+
+    let parsed: ProviderResponse;
+    try {
+      parsed = JSON.parse(rawResponse) as ProviderResponse;
+    } catch {
+      throw new ModelOutputError("provider response was not valid JSON");
+    }
+
+    const message = parsed.choices?.[0]?.message;
+    if (!message || typeof message !== "object") {
+      throw new ModelOutputError("provider response had no choices");
+    }
+
+    const toolCall = request.tool
+      ? message.tool_calls?.find(
+          (call) => call.function?.name === request.tool?.name,
+        )
+      : message.tool_calls?.[0];
+    const rawArguments = toolCall?.function?.arguments;
+    if (
+      rawArguments !== undefined &&
+      (typeof rawArguments !== "string" || rawArguments.trim().length === 0)
+    ) {
+      throw new ModelOutputError("tool arguments were empty");
+    }
+    if (
+      typeof rawArguments === "string" &&
+      new TextEncoder().encode(rawArguments).byteLength >
+        MAX_TOOL_ARGUMENT_BYTES
+    ) {
+      throw new ModelOutputError("tool arguments exceeded the size limit");
+    }
+    const content =
+      typeof message.content === "string" && message.content.trim().length > 0
+        ? message.content
+        : null;
+
+    if (request.tool && message.tool_calls?.length && !toolCall) {
+      throw new ModelOutputError("provider called the wrong tool");
+    }
+    if (!rawArguments && content === null) {
+      throw new ModelOutputError("provider response contained no output");
+    }
+
+    return {
+      toolArguments: rawArguments ?? null,
+      content,
+      latencyMs: Date.now() - startedAt,
+    };
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
+    if (
+      error instanceof ModelOutputError ||
+      error instanceof ProviderHttpError
+    ) {
+      throw error;
+    }
+    if (timedOut) {
       throw new ProviderTimeoutError(timeoutMs);
     }
-    if (controller.signal.aborted) {
-      throw new ProviderTimeoutError(timeoutMs);
+    if (request.signal?.aborted) {
+      throw new ProviderCancelledError();
     }
-    throw error;
+    throw new ProviderNetworkError();
   } finally {
     clearTimeout(timer);
+    request.signal?.removeEventListener("abort", cancelFromCaller);
   }
-
-  if (!response.ok) {
-    throw new ProviderHttpError(response.status);
-  }
-
-  let parsed: ProviderResponse;
-  try {
-    parsed = (await response.json()) as ProviderResponse;
-  } catch {
-    throw new ModelOutputError("provider response was not valid JSON");
-  }
-
-  const message = parsed.choices?.[0]?.message;
-  if (!message) {
-    throw new ModelOutputError("provider response had no choices");
-  }
-
-  return {
-    toolArguments: message.tool_calls?.[0]?.function?.arguments ?? null,
-    content: typeof message.content === "string" ? message.content : null,
-    latencyMs: Date.now() - startedAt,
-  };
 }

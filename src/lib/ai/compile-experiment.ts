@@ -1,7 +1,18 @@
+import type {
+  CompileResponse,
+  ExperimentSpec,
+  GradeBand,
+} from "@/lib/contracts/experiment";
 import { getFeatherlessConfig } from "./config";
-import type { ExperimentSpec } from "./contracts/experiment-spec";
 import type { LearningIntent } from "./contracts/learning-intent";
-import { MissingCredentialsError, ProviderTimeoutError } from "./errors";
+import {
+  MissingCredentialsError,
+  ModelOutputError,
+  ProviderCancelledError,
+  ProviderNetworkError,
+  ProviderRateLimitError,
+  ProviderTimeoutError,
+} from "./errors";
 import { chatCompletion, type ChatMessage } from "./featherless-client";
 import {
   COMPILE_SYSTEM_PROMPT,
@@ -9,61 +20,70 @@ import {
   repairPrompt,
   wrapUntrusted,
 } from "./prompts";
-import { validateExperimentSpec } from "./validation";
-import { closestFixture } from "@/lib/fixtures";
+import { validateRendererExperimentSpec } from "./validation";
+import { closestValidatedExample } from "./validated-examples";
 
 /**
- * compileExperiment: LearningIntent -> validated ExperimentSpec.
+ * compileExperiment: LearningIntent -> renderer-contract CompileResponse.
  *
- * Pipeline: model attempt -> validate -> (on failure) one repair attempt
- * with concise validation errors -> validate -> deterministic fixture
- * fallback. Missing credentials and timeouts skip straight to the fallback.
- * The returned spec is ALWAYS valid: either validated model output or a
- * golden fixture.
+ * Pipeline: model attempt -> validate + server-side correctness overwrite ->
+ * (on failure) one repair attempt with concise validation errors ->
+ * deterministic fixture fallback. Missing credentials, timeouts, provider
+ * errors, and failed repairs all resolve to the closest golden fixture with
+ * provenance.source = "validated-example" and the fallback disclosed in
+ * warnings. The returned spec is ALWAYS valid, and its correctOutcomeKey
+ * values are always computed by the server, never by the model.
  */
-
-export type CompileSource = "model" | "model-repaired" | "fixture";
 
 export type CompileFallbackReason =
   | "missing-credentials"
   | "timeout"
+  | "cancelled"
+  | "network-error"
+  | "rate-limited"
   | "provider-error"
   | "invalid-after-repair";
 
-export interface CompileMeta {
-  source: CompileSource;
-  /** Model attempts made (0 when credentials are missing). */
-  attempts: number;
-  latencyMs: number;
-  fixtureId?: string;
-  fallbackReason?: CompileFallbackReason;
-}
+const FALLBACK_PHRASES: Record<CompileFallbackReason, string> = {
+  "missing-credentials": "The AI compiler is not configured on this server.",
+  timeout: "The AI compiler timed out.",
+  cancelled: "The AI compiler request was cancelled.",
+  "network-error": "The AI compiler could not reach its provider.",
+  "rate-limited": "The AI compiler is busy right now.",
+  "provider-error": "The AI compiler is temporarily unavailable.",
+  "invalid-after-repair":
+    "The AI compiler could not produce a valid experiment for this request.",
+};
 
-export interface CompileResult {
-  spec: ExperimentSpec;
-  meta: CompileMeta;
+export interface CompileOptions {
+  gradeBand: GradeBand;
 }
 
 export interface CompileDeps {
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
 }
 
-function fixtureResult(
+function fixtureResponse(
   intent: LearningIntent,
+  gradeBand: GradeBand,
   reason: CompileFallbackReason,
-  attempts: number,
-  startedAt: number,
-): CompileResult {
-  const fixture = closestFixture(intent);
+): CompileResponse {
+  const spec = closestValidatedExample(intent);
+  spec.gradeBand = gradeBand;
+  const validated = validateRendererExperimentSpec(spec);
+  if (!validated.ok) {
+    throw new Error("Bundled validated example failed validation");
+  }
   return {
-    spec: fixture.spec,
-    meta: {
-      source: "fixture",
-      attempts,
-      latencyMs: Date.now() - startedAt,
-      fixtureId: fixture.spec.id,
-      fallbackReason: reason,
+    spec: validated.spec,
+    warnings: [
+      `${FALLBACK_PHRASES[reason]} You are running a validated example experiment instead.`,
+    ],
+    provenance: {
+      source: "validated-example",
+      generatedAt: new Date().toISOString(),
     },
   };
 }
@@ -85,33 +105,35 @@ function parseAndValidate(toolArguments: string | null): AttemptOutcome {
       errors: ["tool arguments were not valid JSON; emit strict JSON only"],
     };
   }
-  const result = validateExperimentSpec(candidate);
+  const result = validateRendererExperimentSpec(candidate);
   return result.ok ? { spec: result.spec, errors: [] } : { errors: result.errors };
 }
 
 export async function compileExperiment(
   intent: LearningIntent,
+  options: CompileOptions,
   deps: CompileDeps = {},
-): Promise<CompileResult> {
-  const startedAt = Date.now();
+): Promise<CompileResponse> {
+  if (deps.signal?.aborted) {
+    return fixtureResponse(intent, options.gradeBand, "cancelled");
+  }
   const config = getFeatherlessConfig(deps.env);
   if (!config) {
-    return fixtureResult(intent, "missing-credentials", 0, startedAt);
+    return fixtureResponse(intent, options.gradeBand, "missing-credentials");
   }
 
+  const request = { intent, gradeBand: options.gradeBand };
   const messages: ChatMessage[] = [
     { role: "system", content: COMPILE_SYSTEM_PROMPT },
-    { role: "user", content: wrapUntrusted(JSON.stringify(intent)) },
+    { role: "user", content: wrapUntrusted(JSON.stringify(request)) },
   ];
 
-  let attempts = 0;
   let lastErrors: string[] = [];
 
   for (const phase of ["initial", "repair"] as const) {
     if (phase === "repair") {
       messages.push({ role: "user", content: repairPrompt(lastErrors) });
     }
-    attempts += 1;
     try {
       const result = await chatCompletion(
         config,
@@ -119,37 +141,63 @@ export async function compileExperiment(
           model: config.textModel,
           messages,
           tool: EMIT_EXPERIMENT_SPEC_TOOL,
+          maxTokens: 3000,
+          signal: deps.signal,
         },
         deps.fetchImpl,
       );
       const outcome = parseAndValidate(result.toolArguments);
       if (outcome.spec) {
+        const spec = structuredClone(outcome.spec);
+        // The grade band comes from validated request data, not the model.
+        spec.gradeBand = options.gradeBand;
         return {
-          spec: outcome.spec,
-          meta: {
-            source: phase === "initial" ? "model" : "model-repaired",
-            attempts,
-            latencyMs: Date.now() - startedAt,
+          spec,
+          warnings:
+            phase === "repair"
+              ? [
+                  "The generated experiment required one automatic correction before it passed validation.",
+                ]
+              : [],
+          provenance: {
+            source: "generated",
+            model: config.textModel,
+            generatedAt: new Date().toISOString(),
           },
         };
       }
       lastErrors = outcome.errors;
-      // Keep the invalid output in context so the repair sees what it wrote.
-      messages.push({
-        role: "assistant",
-        content: result.toolArguments ?? result.content ?? "",
-      });
     } catch (error) {
+      if (error instanceof ModelOutputError) {
+        lastErrors = [
+          "the provider returned unusable structured output; call emit_experiment_spec with complete strict JSON",
+        ];
+        if (phase === "initial") continue;
+        return fixtureResponse(
+          intent,
+          options.gradeBand,
+          "invalid-after-repair",
+        );
+      }
       if (error instanceof ProviderTimeoutError) {
-        return fixtureResult(intent, "timeout", attempts, startedAt);
+        return fixtureResponse(intent, options.gradeBand, "timeout");
+      }
+      if (error instanceof ProviderCancelledError) {
+        return fixtureResponse(intent, options.gradeBand, "cancelled");
+      }
+      if (error instanceof ProviderNetworkError) {
+        return fixtureResponse(intent, options.gradeBand, "network-error");
+      }
+      if (error instanceof ProviderRateLimitError) {
+        return fixtureResponse(intent, options.gradeBand, "rate-limited");
       }
       if (error instanceof MissingCredentialsError) {
-        return fixtureResult(intent, "missing-credentials", attempts, startedAt);
+        return fixtureResponse(intent, options.gradeBand, "missing-credentials");
       }
       // HTTP or envelope errors are not repairable by the model.
-      return fixtureResult(intent, "provider-error", attempts, startedAt);
+      return fixtureResponse(intent, options.gradeBand, "provider-error");
     }
   }
 
-  return fixtureResult(intent, "invalid-after-repair", attempts, startedAt);
+  return fixtureResponse(intent, options.gradeBand, "invalid-after-repair");
 }
