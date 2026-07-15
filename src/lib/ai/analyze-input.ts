@@ -11,6 +11,10 @@ import {
   type ChatMessage,
 } from "./featherless-client";
 import {
+  MissingCredentialsError,
+  ProviderCancelledError,
+} from "./errors";
+import {
   ANALYZE_SYSTEM_PROMPT,
   REPORT_LEARNING_INTENT_TOOL,
   sanitizeUserText,
@@ -21,10 +25,10 @@ import {
  * analyzeInput: untrusted learner text (and optionally an image, e.g. a
  * photo of a homework problem) -> validated LearningIntent.
  *
- * Totality guarantee: this function never throws for well-typed inputs.
- * Missing credentials, provider failures, timeouts, and unusable model
- * output all deterministically degrade to the keyword heuristic, so the
- * compiler downstream always has an intent to work with.
+ * Provider failures degrade to the keyword heuristic so the compiler can
+ * choose a safe validated example. The learner-facing UI never opens that
+ * example automatically: generated provenance is required for the custom
+ * question, and an explicit second action is required for the demo path.
  */
 
 export const SUPPORTED_IMAGE_MIME_TYPES = [
@@ -44,6 +48,7 @@ export interface AnalyzeDeps {
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
+  fallbackMode?: "heuristic" | "error";
 }
 
 const FAMILY_KEYWORDS: ReadonlyArray<{
@@ -128,7 +133,7 @@ function heuristicDifficulty(text: string): Difficulty {
 /**
  * Deterministic keyword router. Also the documented behavior for prompt
  * injection attempts: adversarial text almost never names a physics family,
- * so it routes to "unknown" and the compiler serves a bundled fixture.
+ * so it routes to "unknown" in explicitly offline tooling.
  */
 export function heuristicIntent(
   rawText: string,
@@ -214,10 +219,12 @@ export async function analyzeInput(
 ): Promise<LearningIntent> {
   const usedImage = image !== undefined;
   if (deps.signal?.aborted) {
+    if (deps.fallbackMode === "error") throw new ProviderCancelledError();
     return heuristicIntent(text, usedImage);
   }
   const config = getFeatherlessConfig(deps.env);
   if (!config) {
+    if (deps.fallbackMode === "error") throw new MissingCredentialsError();
     return heuristicIntent(text, usedImage);
   }
 
@@ -248,7 +255,8 @@ export async function analyzeInput(
       usedImage,
     });
     return parsed.success ? parsed.data : heuristicIntent(text, usedImage);
-  } catch {
+  } catch (error) {
+    if (deps.fallbackMode === "error") throw error;
     // Timeout, HTTP error, or malformed JSON — degrade deterministically.
     return heuristicIntent(text, usedImage);
   }

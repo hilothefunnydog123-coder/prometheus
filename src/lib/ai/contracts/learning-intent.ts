@@ -6,8 +6,8 @@ import { EXPERIMENT_FAMILIES, safeText, slugSchema } from "../text-rules";
  *
  * The routing result of analyzeInput(): what the learner wants to study,
  * mapped onto an experiment family. `family: "unknown"` is a valid result
- * and downstream code must handle it (the compiler falls back to the
- * closest bundled fixture).
+ * and downstream code must handle it (the learner-facing route returns a
+ * supported-topics response).
  */
 
 export const INTENT_FAMILIES = [...EXPERIMENT_FAMILIES, "unknown"] as const;

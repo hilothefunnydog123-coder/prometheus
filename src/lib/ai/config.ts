@@ -11,14 +11,17 @@ export interface FeatherlessConfig {
   visionModel: string;
   baseUrl: string;
   timeoutMs: number;
+  maxTokensParameter: "max_tokens" | "max_completion_tokens";
+  supportsTemperature: boolean;
 }
 
 export const DEFAULT_BASE_URL = "https://api.featherless.ai/v1";
 export const DEFAULT_TIMEOUT_MS = 20_000;
 
 /** Documented defaults; override with FEATHERLESS_TEXT_MODEL / _VISION_MODEL. */
-export const DEFAULT_TEXT_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct";
-export const DEFAULT_VISION_MODEL = "Qwen/Qwen2.5-VL-7B-Instruct";
+export const DEFAULT_TEXT_MODEL = "Qwen/Qwen3-32B";
+export const DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct";
+export const DEFAULT_NETLIFY_GATEWAY_MODEL = "gpt-5.4-mini";
 
 /**
  * Throws if imported into a browser bundle. Every module that can touch the
@@ -31,15 +34,18 @@ export function assertServerOnly(): void {
 }
 
 /**
- * Returns null when FEATHERLESS_API_KEY is absent — callers treat that as
- * "missing credentials" and take the deterministic fallback path.
+ * Featherless remains the explicit provider when configured. On Netlify,
+ * OPENAI_API_KEY + OPENAI_BASE_URL are injected automatically by AI Gateway,
+ * so deployed builds get real model inference without a checked-in secret.
+ * Returns null only when neither provider is available.
  */
 export function getFeatherlessConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): FeatherlessConfig | null {
   assertServerOnly();
-  const apiKey = env.FEATHERLESS_API_KEY?.trim();
-  if (!apiKey) return null;
+  const featherlessApiKey = env.FEATHERLESS_API_KEY?.trim();
+  const netlifyApiKey = env.OPENAI_API_KEY?.trim();
+  const netlifyBaseUrl = env.OPENAI_BASE_URL?.trim();
 
   const timeoutRaw = Number(env.FEATHERLESS_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
   const timeoutMs =
@@ -47,14 +53,35 @@ export function getFeatherlessConfig(
       ? Math.min(timeoutRaw, 120_000)
       : DEFAULT_TIMEOUT_MS;
 
-  return {
-    apiKey,
-    textModel: env.FEATHERLESS_TEXT_MODEL?.trim() || DEFAULT_TEXT_MODEL,
-    visionModel: env.FEATHERLESS_VISION_MODEL?.trim() || DEFAULT_VISION_MODEL,
-    baseUrl: (env.FEATHERLESS_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(
-      /\/+$/,
-      "",
-    ),
-    timeoutMs,
-  };
+  if (featherlessApiKey) {
+    return {
+      apiKey: featherlessApiKey,
+      textModel: env.FEATHERLESS_TEXT_MODEL?.trim() || DEFAULT_TEXT_MODEL,
+      visionModel: env.FEATHERLESS_VISION_MODEL?.trim() || DEFAULT_VISION_MODEL,
+      baseUrl: (env.FEATHERLESS_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(
+        /\/+$/,
+        "",
+      ),
+      timeoutMs,
+      maxTokensParameter: "max_tokens",
+      supportsTemperature: true,
+    };
+  }
+
+  if (netlifyApiKey && netlifyBaseUrl) {
+    const baseUrl = netlifyBaseUrl.replace(/\/+$/, "");
+    const gatewayModel =
+      env.NETLIFY_AI_MODEL?.trim() || DEFAULT_NETLIFY_GATEWAY_MODEL;
+    return {
+      apiKey: netlifyApiKey,
+      textModel: gatewayModel,
+      visionModel: env.NETLIFY_AI_VISION_MODEL?.trim() || gatewayModel,
+      baseUrl: baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`,
+      timeoutMs,
+      maxTokensParameter: "max_completion_tokens",
+      supportsTemperature: false,
+    };
+  }
+
+  return null;
 }

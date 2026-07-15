@@ -12,6 +12,8 @@ export type EvidencePoint = {
   primary: number;
   secondary?: number;
   tertiary?: number;
+  primaryVelocity?: number;
+  secondaryVelocity?: number;
 };
 
 export type SimulationEvidence = {
@@ -166,6 +168,38 @@ function dropHeightAtTime(
   const distance =
     logCosh(Math.sqrt(gravity * dragFactor) * time) / dragFactor;
   return Math.max(0, initialHeight - distance);
+}
+
+function dropSpeedAtTime(
+  gravity: number,
+  time: number,
+  dragFactor: number,
+  impactTime: number,
+) {
+  if (time > impactTime) return 0;
+  if (dragFactor < 1e-12) return gravity * time;
+  const terminalSpeed = Math.sqrt(gravity / dragFactor);
+  return (
+    terminalSpeed * Math.tanh(Math.sqrt(gravity * dragFactor) * time)
+  );
+}
+
+export function isVelocityFocusedDrop(spec: ExperimentSpec): boolean {
+  if (spec.scene.family !== "drop") return false;
+  const learnerFacingText = [
+    spec.title,
+    spec.objective,
+    spec.sourceSummary,
+    spec.prediction.prompt,
+    spec.misconception.title,
+    spec.misconception.description,
+    ...spec.measurements.map((measurement) => measurement.label),
+  ]
+    .join(" ")
+    .toLowerCase();
+  return /terminal velocity|air resistance|drag|speed|velocity/.test(
+    learnerFacingText,
+  );
 }
 
 export function classifyDropImpactTimes(timeA: number, timeB: number) {
@@ -823,6 +857,7 @@ export function buildEvidence(spec: ExperimentSpec): SimulationEvidence {
       b.dragCoefficient,
     );
     const duration = Math.max(timeA, timeB);
+    const velocityFocused = isVelocityFocusedDrop(spec);
     const points = Array.from({ length: 31 }, (_, index) => {
       const time = (duration * index) / 30;
       return {
@@ -841,6 +876,18 @@ export function buildEvidence(spec: ExperimentSpec): SimulationEvidence {
           dragFactorB,
           timeB,
         ),
+        primaryVelocity: dropSpeedAtTime(
+          scene.gravity,
+          time,
+          dragFactorA,
+          timeA,
+        ),
+        secondaryVelocity: dropSpeedAtTime(
+          scene.gravity,
+          time,
+          dragFactorB,
+          timeB,
+        ),
       };
     });
     const outcomeKey = classifyDropImpactTimes(timeA, timeB);
@@ -849,13 +896,31 @@ export function buildEvidence(spec: ExperimentSpec): SimulationEvidence {
       outcomeKey,
       duration,
       summary:
-        outcomeKey === "tie"
+        velocityFocused && hasDrag
+          ? "Each object speeds up until quadratic air resistance grows toward its weight. As those forces balance, acceleration approaches zero and the speed approaches terminal velocity."
+          : outcomeKey === "tie"
           ? hasDrag
             ? "The quadratic-drag impact times differ by no more than one 30 fps frame. Equal timing follows from equal drag per unit mass, not mass alone."
             : "With drag absent, both objects accelerate at g and land together; inertial and gravitational mass cancel."
           : "Quadratic drag scales with air density, drag coefficient, frontal area, and speed squared; acceleration from drag is inversely proportional to mass.",
-      metricA: { label: "Object A impact", value: `${timeA.toFixed(2)} s` },
-      metricB: { label: "Object B impact", value: `${timeB.toFixed(2)} s` },
+      metricA: velocityFocused
+        ? {
+            label: "Object A terminal speed",
+            value:
+              dragFactorA > 0
+                ? `${Math.sqrt(scene.gravity / dragFactorA).toFixed(1)} m/s`
+                : "No drag limit",
+          }
+        : { label: "Object A impact", value: `${timeA.toFixed(2)} s` },
+      metricB: velocityFocused
+        ? {
+            label: "Object B terminal speed",
+            value:
+              dragFactorB > 0
+                ? `${Math.sqrt(scene.gravity / dragFactorB).toFixed(1)} m/s`
+                : "No drag limit",
+          }
+        : { label: "Object B impact", value: `${timeB.toFixed(2)} s` },
       points,
     };
   }

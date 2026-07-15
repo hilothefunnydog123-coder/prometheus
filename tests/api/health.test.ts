@@ -8,6 +8,8 @@ afterEach(() => {
 describe("GET /api/health", () => {
   it("reports an operational app without exposing configuration", async () => {
     vi.stubEnv("FEATHERLESS_API_KEY", "");
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("OPENAI_BASE_URL", "");
     const response = await GET();
 
     expect(response.status).toBe(200);
@@ -20,6 +22,8 @@ describe("GET /api/health", () => {
 
   it("reports only whether the provider is configured", async () => {
     vi.stubEnv("FEATHERLESS_API_KEY", "super-secret-key");
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("OPENAI_BASE_URL", "");
     vi.stubEnv("FEATHERLESS_TEXT_MODEL", "private-model-name");
     const response = await GET();
     const raw = await response.text();

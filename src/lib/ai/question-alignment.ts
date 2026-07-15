@@ -1,0 +1,186 @@
+import type { ExperimentSpec } from "@/lib/contracts/experiment";
+import { sanitizeUserText } from "./prompts";
+
+const QUESTION_STOP_WORDS = new Set([
+  "about",
+  "affect",
+  "and",
+  "are",
+  "ball",
+  "diagram",
+  "does",
+  "drop",
+  "explain",
+  "fall",
+  "falling",
+  "for",
+  "from",
+  "happen",
+  "happens",
+  "how",
+  "image",
+  "into",
+  "learn",
+  "me",
+  "object",
+  "objects",
+  "pendulum",
+  "projectile",
+  "photo",
+  "please",
+  "show",
+  "that",
+  "teach",
+  "the",
+  "their",
+  "this",
+  "through",
+  "understand",
+  "what",
+  "when",
+  "where",
+  "which",
+  "why",
+  "with",
+  "would",
+]);
+
+function learnerFacingText(spec: ExperimentSpec): string {
+  return [
+    spec.title,
+    spec.objective,
+    spec.sourceSummary,
+    spec.prediction.prompt,
+    spec.prediction.reasoningPrompt,
+    spec.misconception.title,
+    spec.misconception.description,
+    ...spec.misconception.explanationRubric,
+    ...spec.measurements.map((measurement) => measurement.label),
+    ...spec.controls.map((control) => control.label),
+    ...spec.counterfactuals.flatMap((counterfactual) => [
+      counterfactual.title,
+      counterfactual.prompt,
+      counterfactual.prediction.prompt,
+      counterfactual.prediction.reasoningPrompt,
+    ]),
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function hasChangePath(spec: ExperimentSpec, targetPath: string): boolean {
+  return (
+    spec.controls.some((control) => control.targetPath === targetPath) ||
+    spec.prediction.testChange?.targetPath === targetPath ||
+    spec.counterfactuals.some(
+      (counterfactual) =>
+        counterfactual.change.targetPath === targetPath ||
+        counterfactual.prediction.testChange?.targetPath === targetPath,
+    )
+  );
+}
+
+/**
+ * Question-specific semantic checks applied after structural and physics
+ * validation. They prevent a valid generic family fixture from being passed
+ * off as an answer to a more specific learner question.
+ */
+export function questionAlignmentErrors(
+  spec: ExperimentSpec,
+  sourceQuestion: string,
+): string[] {
+  const question = sanitizeUserText(sourceQuestion).toLowerCase();
+  const text = learnerFacingText(spec);
+  const errors: string[] = [];
+
+  const asksTerminalVelocity = /\bterminal velocity\b/.test(question);
+  const asksAboutDrag =
+    asksTerminalVelocity || /\b(?:air resistance|aerodynamic drag|drag force)\b/.test(question);
+
+  if (asksTerminalVelocity) {
+    if (spec.scene.family !== "drop") {
+      errors.push("terminal-velocity questions require a drop scene");
+    }
+    if (!/\bterminal velocity\b/.test(text)) {
+      errors.push(
+        "learner-facing text must explicitly explain terminal velocity",
+      );
+    }
+    if (!spec.measurements.some((measurement) => /speed|velocity/i.test(measurement.label))) {
+      errors.push(
+        "terminal-velocity experiments must measure speed or velocity",
+      );
+    }
+  }
+
+  if (asksAboutDrag) {
+    if (spec.scene.family === "drop") {
+      if (spec.scene.airDensity <= 0) {
+        errors.push("air-resistance questions require non-zero air density");
+      }
+      if (
+        !spec.scene.objects.some(
+          (object) => object.dragCoefficient > 0 && object.radius > 0,
+        )
+      ) {
+        errors.push(
+          "air-resistance questions require an object with non-zero drag",
+        );
+      }
+      if (
+        !hasChangePath(spec, "scene.airDensity") &&
+        !hasChangePath(spec, "scene.objects.0.dragCoefficient") &&
+        !hasChangePath(spec, "scene.objects.1.dragCoefficient") &&
+        !hasChangePath(spec, "scene.objects.0.radius") &&
+        !hasChangePath(spec, "scene.objects.1.radius")
+      ) {
+        errors.push(
+          "air-resistance questions must expose or change an air/drag variable",
+        );
+      }
+    } else if (spec.scene.family === "projectile") {
+      if (spec.scene.object.dragCoefficient <= 0) {
+        errors.push("air-resistance questions require non-zero projectile drag");
+      }
+    }
+  }
+
+  if (/\b(?:launch|projection) angle\b|\bangle.*(?:range|distance)\b/.test(question)) {
+    if (spec.scene.family !== "projectile") {
+      errors.push("launch-angle questions require a projectile scene");
+    } else if (!hasChangePath(spec, "scene.launch.angleDegrees")) {
+      errors.push(
+        "launch-angle questions must expose or change the launch angle",
+      );
+    }
+  }
+
+  if (
+    /\b(?:string|rope|pendulum) length\b|\bmetronome\b/.test(question)
+  ) {
+    if (spec.scene.family !== "pendulum") {
+      errors.push("pendulum-length questions require a pendulum scene");
+    } else if (!hasChangePath(spec, "scene.length")) {
+      errors.push(
+        "pendulum-length questions must expose or change string length",
+      );
+    }
+  }
+
+  const topicTokens = Array.from(
+    new Set(question.match(/[a-z0-9]+/g) ?? []),
+  ).filter(
+    (token) => token.length >= 4 && !QUESTION_STOP_WORDS.has(token),
+  ).map((token) =>
+    token.length > 5 && token.endsWith("s") ? token.slice(0, -1) : token,
+  );
+  const matchingTokens = topicTokens.filter((token) => text.includes(token));
+  const requiredMatches = Math.min(2, topicTokens.length);
+  if (requiredMatches > 0 && matchingTokens.length < requiredMatches) {
+    errors.push(
+      "learner-facing text must name the specific concepts from sourceQuestion",
+    );
+  }
+
+  return errors;
+}

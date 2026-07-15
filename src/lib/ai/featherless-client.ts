@@ -67,6 +67,31 @@ interface ProviderResponse {
 
 const MAX_PROVIDER_RESPONSE_BYTES = 1024 * 1024;
 const MAX_TOOL_ARGUMENT_BYTES = 256 * 1024;
+const TRANSIENT_HTTP_STATUSES: ReadonlySet<number> = new Set([
+  429, 500, 502, 503, 504,
+]);
+export const TRANSIENT_RETRY_DELAY_MS = 250;
+const MAX_PROVIDER_ATTEMPTS = 2;
+
+function waitForRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new ProviderCancelledError());
+  }
+
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      signal?.removeEventListener("abort", cancel);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    const cancel = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", cancel);
+      reject(new ProviderCancelledError());
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
+  });
+}
 
 async function readResponseText(
   response: Response,
@@ -127,6 +152,33 @@ export async function chatCompletion(
     throw new ProviderCancelledError();
   }
 
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await chatCompletionOnce(config, request, fetchImpl);
+    } catch (error) {
+      if (request.signal?.aborted) {
+        throw new ProviderCancelledError();
+      }
+      const transient =
+        error instanceof ProviderHttpError &&
+        TRANSIENT_HTTP_STATUSES.has(error.status);
+      if (!transient || attempt >= MAX_PROVIDER_ATTEMPTS) {
+        throw error;
+      }
+      await waitForRetry(TRANSIENT_RETRY_DELAY_MS, request.signal);
+    }
+  }
+}
+
+async function chatCompletionOnce(
+  config: FeatherlessConfig,
+  request: ChatRequest,
+  fetchImpl: typeof fetch,
+): Promise<ChatResult> {
+  if (request.signal?.aborted) {
+    throw new ProviderCancelledError();
+  }
+
   const requestedTimeout = request.timeoutMs ?? config.timeoutMs;
   const timeoutMs =
     Number.isFinite(requestedTimeout) && requestedTimeout > 0
@@ -149,9 +201,11 @@ export async function chatCompletion(
   const body: Record<string, unknown> = {
     model: request.model,
     messages: request.messages,
-    temperature: request.temperature ?? 0.2,
-    max_tokens: request.maxTokens ?? 1600,
+    [config.maxTokensParameter]: request.maxTokens ?? 1600,
   };
+  if (config.supportsTemperature) {
+    body.temperature = request.temperature ?? 0.2;
+  }
   if (request.tool) {
     body.tools = [
       {

@@ -171,7 +171,7 @@ describe("compileExperiment", () => {
     expect(result.warnings.join(" ")).toContain("timed out");
   });
 
-  it("falls back to a fixture on provider HTTP errors without repairing", async () => {
+  it("falls back after one transient retry without a model repair", async () => {
     const stub = createFetchStub([
       jsonResponse({ error: "provider-body-secret" }, 500),
     ]);
@@ -182,7 +182,7 @@ describe("compileExperiment", () => {
     expect(result.provenance.source).toBe("validated-example");
     expect(result.warnings.join(" ")).toContain("unavailable");
     expect(JSON.stringify(result)).not.toContain("provider-body-secret");
-    expect(stub.calls).toHaveLength(1);
+    expect(stub.calls).toHaveLength(2);
   });
 
   it("discloses network and rate-limit fallback reasons without provider details", async () => {
@@ -190,10 +190,12 @@ describe("compileExperiment", () => {
       {
         planned: new Error("socket secret"),
         warning: "could not reach",
+        expectedCalls: 1,
       },
       {
         planned: jsonResponse({ error: "quota secret" }, 429),
         warning: "busy",
+        expectedCalls: 2,
       },
     ];
     for (const testCase of cases) {
@@ -206,7 +208,7 @@ describe("compileExperiment", () => {
       expect(result.provenance.source).toBe("validated-example");
       expect(result.warnings.join(" ")).toContain(testCase.warning);
       expect(JSON.stringify(result)).not.toMatch(/socket secret|quota secret/);
-      expect(stub.calls).toHaveLength(1);
+      expect(stub.calls).toHaveLength(testCase.expectedCalls);
     }
   });
 

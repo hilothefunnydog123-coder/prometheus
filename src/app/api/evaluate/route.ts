@@ -2,7 +2,17 @@ import { NextResponse } from "next/server";
 import {
   evaluateExplanation,
   evaluationInputSchema,
+  heuristicEvaluation,
 } from "@/lib/ai/evaluate-explanation";
+import {
+  MissingCredentialsError,
+  ModelOutputError,
+  ProviderCancelledError,
+  ProviderHttpError,
+  ProviderNetworkError,
+  ProviderRateLimitError,
+  ProviderTimeoutError,
+} from "@/lib/ai/errors";
 import {
   decodeUtf8,
   mediaTypeOf,
@@ -15,6 +25,9 @@ import {
  *   {
  *     experimentId: string,
  *     observedOutcome?: string,
+ *     question: string,
+ *     objective: string,
+ *     evidenceSummary: string,
  *     studentExplanation: string,
  *     misconception: MisconceptionSpec
  *   }
@@ -31,6 +44,7 @@ import {
 export const runtime = "nodejs";
 
 const MAX_BODY_BYTES = 64 * 1024;
+const FEEDBACK_MODE_HEADER = "x-counterfactual-feedback-mode";
 
 function errorResponse(
   status: number,
@@ -41,6 +55,32 @@ function errorResponse(
     { error: { code, message } },
     { status },
   );
+}
+
+function aiErrorResponse(error: unknown): NextResponse {
+  if (error instanceof MissingCredentialsError) {
+    return errorResponse(
+      503,
+      "ai_not_configured",
+      "AI explanation feedback is not configured on this deployment. Enable Netlify AI Gateway or add the Featherless API key, then try again.",
+    );
+  }
+  if (error instanceof ProviderRateLimitError) {
+    return errorResponse(429, "ai_busy", "The AI feedback service is busy. Please retry in a moment.");
+  }
+  if (error instanceof ProviderTimeoutError) {
+    return errorResponse(504, "ai_timeout", "The AI feedback service took too long to respond. Please retry.");
+  }
+  if (error instanceof ProviderCancelledError) {
+    return errorResponse(408, "request_cancelled", "The feedback request was cancelled.");
+  }
+  if (error instanceof ProviderNetworkError || error instanceof ProviderHttpError) {
+    return errorResponse(503, "ai_unavailable", "The AI feedback service is temporarily unavailable. Please retry.");
+  }
+  if (error instanceof ModelOutputError) {
+    return errorResponse(502, "ai_invalid_output", "The AI could not produce valid feedback. Please retry.");
+  }
+  return errorResponse(500, "internal_error", "Something went wrong while evaluating the explanation.");
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -82,16 +122,28 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
+  const feedbackMode = request.headers.get(FEEDBACK_MODE_HEADER);
+  if (feedbackMode !== null && feedbackMode !== "heuristic") {
+    return errorResponse(
+      400,
+      "invalid_feedback_mode",
+      "The optional feedback mode is invalid.",
+    );
+  }
+  if (feedbackMode === "heuristic") {
+    return NextResponse.json(heuristicEvaluation(parsed.data), {
+      status: 200,
+      headers: { "x-counterfactual-feedback-source": "heuristic" },
+    });
+  }
+
   try {
     const result = await evaluateExplanation(parsed.data, {
       signal: request.signal,
+      fallbackMode: "error",
     });
     return NextResponse.json(result, { status: 200 });
-  } catch {
-    return errorResponse(
-      500,
-      "internal_error",
-      "Something went wrong while evaluating the explanation.",
-    );
+  } catch (error) {
+    return aiErrorResponse(error);
   }
 }

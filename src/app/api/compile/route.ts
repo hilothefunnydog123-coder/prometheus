@@ -6,7 +6,17 @@ import {
   type ImageInput,
   type SupportedImageMimeType,
 } from "@/lib/ai/analyze-input";
+import { CompileCache, compileCache } from "@/lib/ai/compile-cache";
 import { compileExperiment } from "@/lib/ai/compile-experiment";
+import {
+  MissingCredentialsError,
+  ModelOutputError,
+  ProviderCancelledError,
+  ProviderHttpError,
+  ProviderNetworkError,
+  ProviderRateLimitError,
+  ProviderTimeoutError,
+} from "@/lib/ai/errors";
 import { validateImageData } from "@/lib/ai/image-validation";
 import {
   mediaTypeOf,
@@ -21,12 +31,11 @@ import {
  *   gradeBand: required, "8-10" | "11-12"
  *   image:     optional file, image/png | image/jpeg | image/webp, <= 4 MB
  *
- * Success 200: { spec, warnings, provenance } (CompileResponse). The spec
- * is ALWAYS a valid ExperimentSpec with server-computed correctOutcomeKey
- * values. Provider trouble (missing credentials, timeout, provider error,
- * failed repair) still returns 200 with the closest golden fixture,
- * provenance.source = "validated-example", and the fallback disclosed in
- * warnings.
+ * Success 200: { spec, warnings, provenance } (CompileResponse). Generated
+ * specs have server-computed correctOutcomeKey values. Provider trouble or a
+ * failed repair returns a separate validated example with explicit provenance;
+ * the frontend requires an additional learner action before opening it and
+ * never relabels it as the answer to the custom question.
  *
  * Unsupported educational material returns 422 with a safe message naming
  * the three supported families.
@@ -49,6 +58,55 @@ function errorResponse(
   return NextResponse.json(
     { error: { code, message } },
     { status },
+  );
+}
+
+function aiErrorResponse(error: unknown): NextResponse {
+  if (error instanceof MissingCredentialsError) {
+    return errorResponse(
+      503,
+      "ai_not_configured",
+      "AI experiment generation is not configured on this deployment. Enable Netlify AI Gateway or add the Featherless API key, then try again.",
+    );
+  }
+  if (error instanceof ProviderRateLimitError) {
+    return errorResponse(
+      429,
+      "ai_busy",
+      "The AI experiment generator is busy right now. Please retry in a moment.",
+    );
+  }
+  if (error instanceof ProviderTimeoutError) {
+    return errorResponse(
+      504,
+      "ai_timeout",
+      "The AI experiment generator took too long to respond. Please retry.",
+    );
+  }
+  if (error instanceof ProviderCancelledError) {
+    return errorResponse(408, "request_cancelled", "The generation request was cancelled.");
+  }
+  if (
+    error instanceof ProviderNetworkError ||
+    error instanceof ProviderHttpError
+  ) {
+    return errorResponse(
+      503,
+      "ai_unavailable",
+      "The AI experiment generator is temporarily unavailable. Please retry.",
+    );
+  }
+  if (error instanceof ModelOutputError) {
+    return errorResponse(
+      502,
+      "ai_invalid_output",
+      "The AI could not produce a safe, question-aligned experiment. Try rephrasing the question.",
+    );
+  }
+  return errorResponse(
+    500,
+    "internal_error",
+    "Something went wrong while compiling the experiment.",
   );
 }
 
@@ -199,6 +257,12 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   try {
+    const cacheKey = CompileCache.key(prompt, gradeBand, image?.base64Data);
+    const cached = compileCache.get(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached, { status: 200 });
+    }
+
     const intent = await analyzeInput(prompt, image, {
       signal: request.signal,
     });
@@ -211,15 +275,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
     const response = await compileExperiment(
       intent,
-      { gradeBand },
+      { gradeBand, sourceQuestion: prompt },
       { signal: request.signal },
     );
+    if (response.provenance.source === "generated") {
+      compileCache.set(cacheKey, response);
+    }
     return NextResponse.json(response, { status: 200 });
-  } catch {
-    return errorResponse(
-      500,
-      "internal_error",
-      "Something went wrong while compiling the experiment.",
-    );
+  } catch (error) {
+    return aiErrorResponse(error);
   }
 }

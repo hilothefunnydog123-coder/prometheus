@@ -9,6 +9,7 @@ import {
   MissingCredentialsError,
   ModelOutputError,
   ProviderCancelledError,
+  ProviderHttpError,
   ProviderNetworkError,
   ProviderRateLimitError,
   ProviderTimeoutError,
@@ -22,6 +23,7 @@ import {
 } from "./prompts";
 import { validateRendererExperimentSpec } from "./validation";
 import { closestValidatedExample } from "./validated-examples";
+import { questionAlignmentErrors } from "./question-alignment";
 
 /**
  * compileExperiment: LearningIntent -> renderer-contract CompileResponse.
@@ -57,12 +59,14 @@ const FALLBACK_PHRASES: Record<CompileFallbackReason, string> = {
 
 export interface CompileOptions {
   gradeBand: GradeBand;
+  sourceQuestion?: string;
 }
 
 export interface CompileDeps {
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
+  fallbackMode?: "fixture" | "error";
 }
 
 function fixtureResponse(
@@ -79,7 +83,7 @@ function fixtureResponse(
   return {
     spec: validated.spec,
     warnings: [
-      `${FALLBACK_PHRASES[reason]} You are running a validated example experiment instead.`,
+      `${FALLBACK_PHRASES[reason]} A separate validated example experiment is available instead.`,
     ],
     provenance: {
       source: "validated-example",
@@ -93,7 +97,10 @@ interface AttemptOutcome {
   errors: string[];
 }
 
-function parseAndValidate(toolArguments: string | null): AttemptOutcome {
+function parseAndValidate(
+  toolArguments: string | null,
+  sourceQuestion?: string,
+): AttemptOutcome {
   if (toolArguments === null) {
     return { errors: ["no tool call was made; call emit_experiment_spec"] };
   }
@@ -106,7 +113,24 @@ function parseAndValidate(toolArguments: string | null): AttemptOutcome {
     };
   }
   const result = validateRendererExperimentSpec(candidate);
-  return result.ok ? { spec: result.spec, errors: [] } : { errors: result.errors };
+  if (!result.ok) return { errors: result.errors };
+  const alignmentErrors = sourceQuestion
+    ? questionAlignmentErrors(result.spec, sourceQuestion)
+    : [];
+  return alignmentErrors.length === 0
+    ? { spec: result.spec, errors: [] }
+    : { errors: alignmentErrors };
+}
+
+function fixtureOrThrow(
+  intent: LearningIntent,
+  options: CompileOptions,
+  deps: CompileDeps,
+  reason: CompileFallbackReason,
+  error: Error,
+): CompileResponse {
+  if (deps.fallbackMode === "error") throw error;
+  return fixtureResponse(intent, options.gradeBand, reason);
 }
 
 export async function compileExperiment(
@@ -115,14 +139,31 @@ export async function compileExperiment(
   deps: CompileDeps = {},
 ): Promise<CompileResponse> {
   if (deps.signal?.aborted) {
-    return fixtureResponse(intent, options.gradeBand, "cancelled");
+    return fixtureOrThrow(
+      intent,
+      options,
+      deps,
+      "cancelled",
+      new ProviderCancelledError(),
+    );
   }
   const config = getFeatherlessConfig(deps.env);
   if (!config) {
-    return fixtureResponse(intent, options.gradeBand, "missing-credentials");
+    return fixtureOrThrow(
+      intent,
+      options,
+      deps,
+      "missing-credentials",
+      new MissingCredentialsError(),
+    );
   }
 
-  const request = { intent, gradeBand: options.gradeBand };
+  const sourceQuestion = options.sourceQuestion?.trim();
+  const request = {
+    sourceQuestion: sourceQuestion || intent.topic,
+    intent,
+    gradeBand: options.gradeBand,
+  };
   const messages: ChatMessage[] = [
     { role: "system", content: COMPILE_SYSTEM_PROMPT },
     { role: "user", content: wrapUntrusted(JSON.stringify(request)) },
@@ -146,7 +187,7 @@ export async function compileExperiment(
         },
         deps.fetchImpl,
       );
-      const outcome = parseAndValidate(result.toolArguments);
+      const outcome = parseAndValidate(result.toolArguments, sourceQuestion);
       if (outcome.spec) {
         const spec = structuredClone(outcome.spec);
         // The grade band comes from validated request data, not the model.
@@ -173,31 +214,55 @@ export async function compileExperiment(
           "the provider returned unusable structured output; call emit_experiment_spec with complete strict JSON",
         ];
         if (phase === "initial") continue;
-        return fixtureResponse(
+        return fixtureOrThrow(
           intent,
-          options.gradeBand,
+          options,
+          deps,
           "invalid-after-repair",
+          new ModelOutputError("experiment remained invalid after repair"),
         );
       }
       if (error instanceof ProviderTimeoutError) {
-        return fixtureResponse(intent, options.gradeBand, "timeout");
+        return fixtureOrThrow(intent, options, deps, "timeout", error);
       }
       if (error instanceof ProviderCancelledError) {
-        return fixtureResponse(intent, options.gradeBand, "cancelled");
+        return fixtureOrThrow(intent, options, deps, "cancelled", error);
       }
       if (error instanceof ProviderNetworkError) {
-        return fixtureResponse(intent, options.gradeBand, "network-error");
+        return fixtureOrThrow(intent, options, deps, "network-error", error);
       }
       if (error instanceof ProviderRateLimitError) {
-        return fixtureResponse(intent, options.gradeBand, "rate-limited");
+        return fixtureOrThrow(intent, options, deps, "rate-limited", error);
       }
       if (error instanceof MissingCredentialsError) {
-        return fixtureResponse(intent, options.gradeBand, "missing-credentials");
+        return fixtureOrThrow(
+          intent,
+          options,
+          deps,
+          "missing-credentials",
+          error,
+        );
       }
       // HTTP or envelope errors are not repairable by the model.
-      return fixtureResponse(intent, options.gradeBand, "provider-error");
+      const providerError =
+        error instanceof ProviderHttpError
+          ? error
+          : new ProviderHttpError(502);
+      return fixtureOrThrow(
+        intent,
+        options,
+        deps,
+        "provider-error",
+        providerError,
+      );
     }
   }
 
-  return fixtureResponse(intent, options.gradeBand, "invalid-after-repair");
+  return fixtureOrThrow(
+    intent,
+    options,
+    deps,
+    "invalid-after-repair",
+    new ModelOutputError("experiment remained invalid after repair"),
+  );
 }

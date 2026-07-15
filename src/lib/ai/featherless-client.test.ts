@@ -26,6 +26,8 @@ const config: FeatherlessConfig = {
   visionModel: "test-vision-model",
   baseUrl: "https://provider.test/v1",
   timeoutMs: 1000,
+  maxTokensParameter: "max_tokens",
+  supportsTemperature: true,
 };
 
 const request: ChatRequest = {
@@ -65,6 +67,21 @@ describe("chatCompletion", () => {
       type: "function",
       function: { name: "some_tool" },
     });
+    expect(call.body.max_tokens).toBe(1600);
+    expect(call.body.temperature).toBe(0.2);
+  });
+
+  it("uses the OpenAI gateway token field and omits temperature when configured", async () => {
+    const gatewayConfig: FeatherlessConfig = {
+      ...config,
+      maxTokensParameter: "max_completion_tokens",
+      supportsTemperature: false,
+    };
+    const stub = createFetchStub([textResponse("gateway answer")]);
+    await chatCompletion(gatewayConfig, request, stub.fetchImpl);
+    expect(stub.calls[0]!.body.max_completion_tokens).toBe(1600);
+    expect(stub.calls[0]!.body.max_tokens).toBeUndefined();
+    expect(stub.calls[0]!.body.temperature).toBeUndefined();
   });
 
   it("returns non-empty assistant text when no tool is requested", async () => {
@@ -84,6 +101,7 @@ describe("chatCompletion", () => {
     expect(error).toBeInstanceOf(ProviderHttpError);
     expect((error as ProviderHttpError).status).toBe(503);
     expect(String(error)).not.toContain("provider-body-secret");
+    expect(stub.calls).toHaveLength(2);
   });
 
   it("maps HTTP 429 to a distinct safe rate-limit error", async () => {
@@ -95,6 +113,47 @@ describe("chatCompletion", () => {
     );
     expect(error).toBeInstanceOf(ProviderRateLimitError);
     expect(String(error)).not.toContain("quota detail");
+    expect(stub.calls).toHaveLength(2);
+  });
+
+  it("retries a transient provider error exactly once, then succeeds", async () => {
+    const stub = createFetchStub([
+      jsonResponse({ error: "busy" }, 503),
+      textResponse("recovered"),
+    ]);
+    const result = await chatCompletion(config, request, stub.fetchImpl);
+    expect(result.content).toBe("recovered");
+    expect(stub.calls).toHaveLength(2);
+  });
+
+  it("does not retry non-transient HTTP errors", async () => {
+    const stub = createFetchStub([jsonResponse({ error: "bad request" }, 400)]);
+    await expect(
+      chatCompletion(config, request, stub.fetchImpl),
+    ).rejects.toBeInstanceOf(ProviderHttpError);
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it("does not retry timeouts", async () => {
+    const stub = createFetchStub(["hang"]);
+    await expect(
+      chatCompletion(config, { ...request, timeoutMs: 20 }, stub.fetchImpl),
+    ).rejects.toBeInstanceOf(ProviderTimeoutError);
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it("cancels during retry backoff without making another provider call", async () => {
+    const controller = new AbortController();
+    const stub = createFetchStub([jsonResponse({ error: "busy" }, 503)]);
+    const pending = chatCompletion(
+      config,
+      { ...request, signal: controller.signal },
+      stub.fetchImpl,
+    );
+    await Promise.resolve();
+    controller.abort();
+    await expect(pending).rejects.toBeInstanceOf(ProviderCancelledError);
+    expect(stub.calls).toHaveLength(1);
   });
 
   it("maps network failures without retaining their message or cause", async () => {
