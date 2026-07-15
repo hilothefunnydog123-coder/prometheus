@@ -25,6 +25,10 @@ function input(overrides: Partial<EvaluationInput> = {}): EvaluationInput {
   return {
     experimentId: dropFixture.id,
     observedOutcome: "tie",
+    question: "Do heavier objects fall faster?",
+    objective: dropFixture.objective,
+    evidenceSummary:
+      "Both objects reached the floor at the same measured time.",
     studentExplanation:
       "Gravity gives both spheres the same acceleration, so the timing was equal even though the force on the heavy one is larger.",
     misconception: structuredClone(dropFixture.misconception),

@@ -4,7 +4,11 @@ import {
   type MisconceptionSpec,
 } from "@/lib/contracts/experiment";
 import { getFeatherlessConfig } from "./config";
-import { ModelOutputError } from "./errors";
+import {
+  MissingCredentialsError,
+  ModelOutputError,
+  ProviderCancelledError,
+} from "./errors";
 import { chatCompletion } from "./featherless-client";
 import {
   EVALUATE_SYSTEM_PROMPT,
@@ -31,6 +35,9 @@ import { safeText } from "./text-rules";
 export interface EvaluationInput {
   experimentId: string;
   observedOutcome?: string;
+  question: string;
+  objective: string;
+  evidenceSummary: string;
   studentExplanation: string;
   misconception: MisconceptionSpec;
 }
@@ -39,6 +46,7 @@ export interface EvaluateDeps {
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
+  fallbackMode?: "heuristic" | "error";
 }
 
 const MAX_EXPLANATION_LENGTH = 4000;
@@ -66,6 +74,9 @@ export const evaluationInputSchema = z
       .trim()
       .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,59}$/)
       .optional(),
+    question: safeText(3, 500),
+    objective: safeText(3, 300),
+    evidenceSummary: safeText(3, 600),
     studentExplanation: z.string().trim().min(1).max(MAX_EXPLANATION_LENGTH),
     misconception: safeMisconceptionSchema,
   })
@@ -154,10 +165,12 @@ export async function evaluateExplanation(
   };
 
   if (deps.signal?.aborted) {
+    if (deps.fallbackMode === "error") throw new ProviderCancelledError();
     return heuristicEvaluation(trimmedInput);
   }
   const config = getFeatherlessConfig(deps.env);
   if (!config) {
+    if (deps.fallbackMode === "error") throw new MissingCredentialsError();
     return heuristicEvaluation(trimmedInput);
   }
 
@@ -177,6 +190,9 @@ export async function evaluateExplanation(
         JSON.stringify({
           experimentId: trimmedInput.experimentId,
           observedOutcome: trimmedInput.observedOutcome ?? null,
+          question: trimmedInput.question,
+          objective: trimmedInput.objective,
+          evidenceSummary: trimmedInput.evidenceSummary,
           misconception,
           studentExplanation: trimmedInput.studentExplanation,
         }),
@@ -207,6 +223,9 @@ export async function evaluateExplanation(
       );
       if (result.toolArguments === null) {
         if (phase === "initial") continue;
+        if (deps.fallbackMode === "error") {
+          throw new ModelOutputError("grading tool call was missing after repair");
+        }
         return heuristicEvaluation(trimmedInput);
       }
       let candidate: unknown;
@@ -214,11 +233,17 @@ export async function evaluateExplanation(
         candidate = JSON.parse(result.toolArguments);
       } catch {
         if (phase === "initial") continue;
+        if (deps.fallbackMode === "error") {
+          throw new ModelOutputError("grading JSON was invalid after repair");
+        }
         return heuristicEvaluation(trimmedInput);
       }
       const parsed = resultSchema.safeParse(candidate);
       if (!parsed.success) {
         if (phase === "initial") continue;
+        if (deps.fallbackMode === "error") {
+          throw new ModelOutputError("grading output failed validation after repair");
+        }
         return heuristicEvaluation(trimmedInput);
       }
       return toResponse(
@@ -231,9 +256,13 @@ export async function evaluateExplanation(
       if (error instanceof ModelOutputError && phase === "initial") {
         continue;
       }
+      if (deps.fallbackMode === "error") throw error;
       return heuristicEvaluation(trimmedInput);
     }
   }
 
+  if (deps.fallbackMode === "error") {
+    throw new ModelOutputError("grading output remained invalid after repair");
+  }
   return heuristicEvaluation(trimmedInput);
 }

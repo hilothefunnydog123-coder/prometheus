@@ -10,12 +10,18 @@ import {
   YAxis,
 } from "recharts";
 import type { ExperimentSpec } from "@/lib/contracts/experiment";
-import type { SimulationEvidence } from "@/lib/physics/evidence";
+import {
+  isVelocityFocusedDrop,
+  type SimulationEvidence,
+} from "@/lib/physics/evidence";
 
 export function EvidenceChart({ spec, evidence }: { spec: ExperimentSpec; evidence: SimulationEvidence }) {
+  const velocityFocusedDrop = isVelocityFocusedDrop(spec);
   const labels =
     spec.scene.family === "drop"
-      ? ["Object A height", "Object B height"]
+      ? velocityFocusedDrop
+        ? ["Object A speed", "Object B speed"]
+        : ["Object A height", "Object B height"]
       : spec.scene.family === "projectile"
         ? ["Horizontal position", "Height"]
         : ["Angle", "Speed"];
@@ -30,8 +36,8 @@ export function EvidenceChart({ spec, evidence }: { spec: ExperimentSpec; eviden
             contentStyle={{ background: "#0a111b", border: "1px solid #263846", borderRadius: 10, color: "#eaf6fb", fontSize: 11 }}
             labelFormatter={(value) => `${Number(value).toFixed(2)} s`}
           />
-          <Line type="monotone" dataKey="primary" name={labels[0]} stroke="#ff8a3d" strokeWidth={2.5} dot={false} animationDuration={500} />
-          <Line type="monotone" dataKey="secondary" name={labels[1]} stroke="#5de1ff" strokeWidth={2.5} dot={false} animationDuration={650} />
+          <Line type="monotone" dataKey={velocityFocusedDrop ? "primaryVelocity" : "primary"} name={labels[0]} stroke="#ff8a3d" strokeWidth={2.5} dot={false} animationDuration={500} />
+          <Line type="monotone" dataKey={velocityFocusedDrop ? "secondaryVelocity" : "secondary"} name={labels[1]} stroke="#5de1ff" strokeWidth={2.5} dot={false} animationDuration={650} />
         </LineChart>
       </ResponsiveContainer>
     </div>

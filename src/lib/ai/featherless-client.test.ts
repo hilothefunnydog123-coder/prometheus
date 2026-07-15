@@ -26,6 +26,8 @@ const config: FeatherlessConfig = {
   visionModel: "test-vision-model",
   baseUrl: "https://provider.test/v1",
   timeoutMs: 1000,
+  maxTokensParameter: "max_tokens",
+  supportsTemperature: true,
 };
 
 const request: ChatRequest = {
@@ -65,6 +67,21 @@ describe("chatCompletion", () => {
       type: "function",
       function: { name: "some_tool" },
     });
+    expect(call.body.max_tokens).toBe(1600);
+    expect(call.body.temperature).toBe(0.2);
+  });
+
+  it("uses the OpenAI gateway token field and omits temperature when configured", async () => {
+    const gatewayConfig: FeatherlessConfig = {
+      ...config,
+      maxTokensParameter: "max_completion_tokens",
+      supportsTemperature: false,
+    };
+    const stub = createFetchStub([textResponse("gateway answer")]);
+    await chatCompletion(gatewayConfig, request, stub.fetchImpl);
+    expect(stub.calls[0]!.body.max_completion_tokens).toBe(1600);
+    expect(stub.calls[0]!.body.max_tokens).toBeUndefined();
+    expect(stub.calls[0]!.body.temperature).toBeUndefined();
   });
 
   it("returns non-empty assistant text when no tool is requested", async () => {

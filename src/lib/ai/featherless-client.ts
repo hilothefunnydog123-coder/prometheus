@@ -149,9 +149,11 @@ export async function chatCompletion(
   const body: Record<string, unknown> = {
     model: request.model,
     messages: request.messages,
-    temperature: request.temperature ?? 0.2,
-    max_tokens: request.maxTokens ?? 1600,
+    [config.maxTokensParameter]: request.maxTokens ?? 1600,
   };
+  if (config.supportsTemperature) {
+    body.temperature = request.temperature ?? 0.2;
+  }
   if (request.tool) {
     body.tools = [
       {

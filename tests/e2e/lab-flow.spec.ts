@@ -1,4 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
+import type { ExperimentSpec } from "@/lib/contracts/experiment";
+import {
+  dropDemo,
+  pendulumDemo,
+  projectileDemo,
+} from "@/components/lab/demo-experiments";
 
 type FamilyFlow = {
   card: string;
@@ -7,6 +13,7 @@ type FamilyFlow = {
   counterfactualQuestion: string;
   counterfactualChoice: string;
   explanation: string;
+  spec: ExperimentSpec;
 };
 
 const flows: FamilyFlow[] = [
@@ -19,6 +26,7 @@ const flows: FamilyFlow[] = [
     counterfactualChoice: "A The compact orange sphere",
     explanation:
       "The equal impact times show that mass does not change gravitational acceleration in a vacuum.",
+    spec: dropDemo,
   },
   {
     card: "02 PROJECTILES Why does a thrown ball follow an arc? Enter experiment",
@@ -28,6 +36,7 @@ const flows: FamilyFlow[] = [
     counterfactualChoice: "B Inside the target",
     explanation:
       "Horizontal velocity continued while gravity changed vertical velocity, producing the measured arc.",
+    spec: projectileDemo,
   },
   {
     card: "03 OSCILLATION Does a heavier pendulum swing faster? Enter experiment",
@@ -37,10 +46,44 @@ const flows: FamilyFlow[] = [
     counterfactualChoice: "A The period increases",
     explanation:
       "The measured period depends on string length and gravity, while the bob mass cancels from the timing.",
+    spec: pendulumDemo,
   },
 ];
 
 async function finishLearningLoop(page: Page, flow: FamilyFlow) {
+  await page.route("**/api/compile", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        spec: flow.spec,
+        warnings: [],
+        provenance: {
+          source: "generated",
+          model: "ci-mocked-model",
+          generatedAt: new Date(0).toISOString(),
+        },
+      }),
+    });
+  });
+  await page.route("**/api/evaluate", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        score: 1,
+        criteria: Object.fromEntries(
+          flow.spec.misconception.explanationRubric.map((_, index) => [
+            `criterion-${index + 1}`,
+            true,
+          ]),
+        ),
+        feedback:
+          "Your explanation connected the measured evidence to the generated experiment's causal mechanism.",
+        hint: "Change one measured variable and predict the result.",
+      }),
+    });
+  });
   await page.goto("/");
 
   await expect(

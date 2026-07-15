@@ -23,6 +23,7 @@ import {
   classifyPendulumPeriods,
   classifyProjectileRange,
   determineOutcome,
+  isVelocityFocusedDrop,
   pendulumPeriod,
   projectileMetrics,
   quadraticDragDropTime,
@@ -126,6 +127,23 @@ describe("falling objects", () => {
     expectWithinTwoPercent(evidence.duration, expected);
     expect(evidence.outcomeKey).toBe("tie");
     expect(evidence.points.at(-1)).toMatchObject({ primary: 0, secondary: 0 });
+  });
+
+  it("turns a terminal-velocity lab into velocity evidence, not a height-only chart", () => {
+    const spec = structuredClone(dropDemo);
+    if (spec.scene.family !== "drop") throw new Error("drop fixture");
+    spec.objective = "Observe speed approach terminal velocity under drag.";
+    spec.scene.airDensity = 1.225;
+    spec.measurements = [
+      { id: "velocity-a", label: "Object A velocity", unit: "m/s", color: "#ff8a3d" },
+      { id: "velocity-b", label: "Object B velocity", unit: "m/s", color: "#5de1ff" },
+    ];
+    const evidence = buildEvidence(spec);
+    expect(isVelocityFocusedDrop(spec)).toBe(true);
+    expect(evidence.summary).toContain("terminal velocity");
+    expect(evidence.metricA.label).toContain("terminal speed");
+    expect(evidence.metricA.value).toMatch(/ m\/s$/);
+    expect(evidence.points.some((point) => (point.primaryVelocity ?? 0) > 0)).toBe(true);
   });
 
   it("uses quadratic drag and makes the lower area-to-mass ratio arrive first", () => {

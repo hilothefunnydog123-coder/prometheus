@@ -550,6 +550,13 @@ button:disabled {
   color: #ff8f84;
 }
 
+.panel-error {
+  margin: 12px 0 0;
+  color: #ff8f84;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .example-section {
   padding: 40px 32px 0;
   border-top: 1px solid var(--line);

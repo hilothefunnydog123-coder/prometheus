@@ -30,8 +30,8 @@ analyzeInput ──────────────► LearningIntent (Zod-v
                               │    feasibility + prediction coverage +
                               │    counterfactual patch allowlist
                               │ 3. one repair attempt w/ concise errors
-                              │ 4. deterministic fallback: closest golden
-                              │    fixture (drop / projectile / pendulum)
+                              │ 4. question-alignment validation; explicit
+                              │    retry/configuration error on AI failure
                               ▼
                         ExperimentSpec  ──► 3D renderer (Contributor A)
 
@@ -54,10 +54,10 @@ POST /api/evaluate (JSON) ──► evaluateExplanation ──► rubric + feedb
 | `src/lib/ai/contracts/evaluation.ts` | Rubric contract + deterministic overall/masterySignal derivation. |
 | `src/lib/ai/featherless-client.ts` | Server-only OpenAI-compatible client (forced tool calls, timeout, typed errors, injectable fetch). |
 | `src/lib/ai/prompts.ts` | System prompts, untrusted-input wrapping, hand-written tool JSON Schemas (Zod stays authoritative). |
-| `src/lib/ai/analyze-input.ts` | text/image → LearningIntent; deterministic keyword heuristic fallback. |
-| `src/lib/ai/compile-experiment.ts` | intent → validated ExperimentSpec; one repair round; fixture fallback. |
+| `src/lib/ai/analyze-input.ts` | text/image → LearningIntent; production routes require a successful model call. |
+| `src/lib/ai/compile-experiment.ts` | exact question + intent → validated, question-aligned ExperimentSpec; one repair round. |
 | `src/lib/ai/validation.ts` | Bounds, family feasibility (event fits simulation window), prediction outcome coverage, single-property counterfactual patch checks. |
-| `src/lib/ai/evaluate-explanation.ts` | Explanation → rubric. Total function; heuristic fallback. Never updates mastery. |
+| `src/lib/ai/evaluate-explanation.ts` | Question + evidence + explanation → AI rubric feedback. Never updates mastery. |
 | `src/lib/mastery/bkt.ts` | Bayesian Knowledge Tracing (pInit .25, pLearn .15, pGuess .20, pSlip .10), pure functions. |
 | `src/lib/fixtures/` | Golden fixtures (drop, projectile, pendulum) + deterministic closest-fixture selection. |
 | `src/lib/ai/eval/` | 30-case eval dataset + opt-in `npm run eval:compiler` script (never in CI). |
@@ -70,15 +70,20 @@ POST /api/evaluate (JSON) ──► evaluateExplanation ──► rubric + feedb
   Inputs are sanitized (control chars stripped, length-capped), delimited as
   `<user_input>`, and — decisively — every model response passes through a
   forced tool call and full server-side validation. A successful injection
-  can at worst produce an invalid spec, which falls back to a golden fixture.
+  can at worst produce an invalid spec, which is rejected with a safe error.
 - **No code execution**: specs are declarative data; every text field rejects
   control characters and angle brackets at the schema level.
-- **Server-only secrets**: `FEATHERLESS_API_KEY` is read at call time inside
-  server modules guarded by a browser-environment assertion; it never appears
-  in errors, logs, or the client bundle.
-- **Deterministic degradation**: missing credentials, timeouts, provider
-  errors, and failed repairs all resolve to the closest bundled fixture — the
-  API never returns an invalid spec and never 500s for provider trouble.
+- **Server-only provider access**: an explicit `FEATHERLESS_API_KEY` can be
+  used locally or on any host. On Netlify, the runtime automatically uses the
+  injected AI Gateway `OPENAI_API_KEY` + `OPENAI_BASE_URL`; neither credential
+  appears in errors, logs, or the client bundle.
+- **No misleading substitution**: missing credentials, timeouts, provider
+  errors, and failed repairs return explicit safe errors. A custom question
+  is never relabeled onto a bundled experiment.
+- **Question alignment**: the exact learner question is included in the
+  compiler request and checked after schema/physics validation. For example,
+  terminal-velocity labs must enable drag, measure velocity, expose a drag
+  variable, and explain terminal velocity in learner-facing text.
 - **Safe errors**: API error messages are static strings (never echo user
   input) and are HTML-escaped as defense in depth.
 - **No live AI in tests/CI**: unit tests inject a fetch stub; route tests
@@ -89,14 +94,19 @@ POST /api/evaluate (JSON) ──► evaluateExplanation ──► rubric + feedb
 
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
-| `FEATHERLESS_API_KEY` | no¹ | — | Featherless API key (server-only). |
-| `FEATHERLESS_TEXT_MODEL` | no | `meta-llama/Meta-Llama-3.1-8B-Instruct` | Text routing/compiling/grading model. |
-| `FEATHERLESS_VISION_MODEL` | no | `Qwen/Qwen2.5-VL-7B-Instruct` | Used when the learner uploads an image. |
+| `FEATHERLESS_API_KEY` | no¹ | — | Optional explicit Featherless API key (server-only). |
+| `FEATHERLESS_TEXT_MODEL` | no | `Qwen/Qwen3-32B` | Native tool-calling model for routing, compiling, and grading. |
+| `FEATHERLESS_VISION_MODEL` | no | `Qwen/Qwen3-VL-30B-A3B-Instruct` | Vision + tool-calling model for uploaded diagrams. |
 | `FEATHERLESS_BASE_URL` | no | `https://api.featherless.ai/v1` | OpenAI-compatible endpoint. |
 | `FEATHERLESS_TIMEOUT_MS` | no | `20000` | Per-request provider timeout. |
+| `NETLIFY_AI_MODEL` | no | `gpt-5.4-mini` | Text/tool model when Netlify AI Gateway is available. |
+| `NETLIFY_AI_VISION_MODEL` | no | `gpt-5.4-mini` | Vision/tool model when Netlify AI Gateway is available. |
 
-¹ Without a key the whole pipeline still works deterministically (fixtures +
-heuristic rubric) — useful for demos and CI.
+¹ Netlify automatically injects its AI Gateway OpenAI credentials on eligible
+credit-based deployments. Other hosts and ordinary local `next dev` runs need
+an explicit Featherless key. Automated tests mock provider responses and never
+make live model calls. The learner-facing application does not enable fixture
+fallback.
 
 ### Scripts
 

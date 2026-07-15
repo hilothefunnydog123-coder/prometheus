@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/compile/route";
-import {
-  experimentSpecSchema,
-  type CompileResponse,
-} from "@/lib/contracts/experiment";
+import type { CompileResponse } from "@/lib/contracts/experiment";
 import {
   dropDemo,
   pendulumDemo as pendulumFixture,
@@ -50,8 +47,42 @@ interface ErrorBody {
   error: { code: string; message: string };
 }
 
+const terminalVelocitySpec = (() => {
+  const spec = structuredClone(dropDemo);
+  if (spec.scene.family !== "drop") throw new Error("drop fixture");
+  spec.id = "terminal-velocity-generated";
+  spec.title = "Approaching Terminal Velocity";
+  spec.objective =
+    "Measure how air resistance makes falling speed approach terminal velocity.";
+  spec.sourceSummary =
+    "Two objects fall through air while their velocities and drag are compared.";
+  spec.scene.airDensity = 1.225;
+  spec.controls.push({
+    id: "air-density",
+    label: "Air density",
+    unit: "kg/m³",
+    min: 0,
+    max: 2,
+    step: 0.025,
+    value: 1.225,
+    targetPath: "scene.airDensity",
+  });
+  spec.measurements = [
+    { id: "speed-a", label: "Object A velocity", unit: "m/s", color: "#ff8a3d" },
+    { id: "speed-b", label: "Object B velocity", unit: "m/s", color: "#5de1ff" },
+  ];
+  spec.prediction.prompt =
+    "Which object approaches the greater terminal velocity?";
+  spec.misconception.title = "Terminal velocity is a fixed speed";
+  spec.misconception.description =
+    "Terminal velocity occurs when drag balances weight and depends on mass, area, air density, and drag coefficient.";
+  return spec;
+})();
+
 beforeEach(() => {
   vi.stubEnv("FEATHERLESS_API_KEY", "");
+  vi.stubEnv("OPENAI_API_KEY", "");
+  vi.stubEnv("OPENAI_BASE_URL", "");
   vi.stubGlobal(
     "fetch",
     (() => {
@@ -66,30 +97,17 @@ afterEach(() => {
 });
 
 describe("POST /api/compile", () => {
-  it("returns a disclosed fixture CompileResponse when the provider is unavailable", async () => {
+  it("requires an AI provider instead of substituting a fixture", async () => {
     const response = await POST(
       multipartRequest({
         prompt: "does a heavier pendulum bob swing faster?",
         gradeBand: "8-10",
       }),
     );
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as CompileResponse;
-    expect(body.spec.id).toBe(pendulumFixture.id);
-    expect(body.provenance.source).toBe("validated-example");
-    expect(typeof body.provenance.generatedAt).toBe("string");
-    expect(body.warnings.length).toBeGreaterThan(0);
-    expect(body.warnings.join(" ")).toContain("validated example");
-    // The response spec must satisfy the exact renderer contract.
-    expect(() => experimentSpecSchema.parse(body.spec)).not.toThrow();
-  });
-
-  it("adopts the requested gradeBand in fallback specs", async () => {
-    const response = await POST(
-      multipartRequest({ prompt: "why do dropped things fall", gradeBand: "11-12" }),
-    );
-    const body = (await response.json()) as CompileResponse;
-    expect(body.spec.gradeBand).toBe("11-12");
+    expect(response.status).toBe(503);
+    const body = (await response.json()) as ErrorBody;
+    expect(body.error.code).toBe("ai_not_configured");
+    expect(body.error.message).not.toContain("validated example");
   });
 
   it("returns generated provenance when the provider succeeds", async () => {
@@ -117,9 +135,55 @@ describe("POST /api/compile", () => {
     expect(body.provenance.source).toBe("generated");
     expect(body.provenance.model).toBeTruthy();
     expect(stub.calls).toHaveLength(2);
+    expect(JSON.stringify(stub.calls[1]!.body)).toContain(
+      "teach me about pendulum periods",
+    );
+  });
+
+  it("repairs a generic fixture until it matches a terminal-velocity question", async () => {
+    vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
+    const stub = createFetchStub([
+      toolCallResponse("report_learning_intent", {
+        topic: "air resistance and terminal velocity",
+        family: "drop",
+        concepts: ["terminal-velocity", "quadratic-drag"],
+        difficulty: "standard",
+        confidence: 0.98,
+      }),
+      toolCallResponse("emit_experiment_spec", dropDemo),
+      toolCallResponse("emit_experiment_spec", terminalVelocitySpec),
+    ]);
+    vi.stubGlobal("fetch", stub.fetchImpl);
+
+    const response = await POST(
+      multipartRequest({
+        prompt: "How does air resistance affect terminal velocity?",
+        gradeBand: "8-10",
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as CompileResponse;
+    expect(body.spec.id).toBe("terminal-velocity-generated");
+    expect(body.spec.scene.family).toBe("drop");
+    expect(body.provenance.source).toBe("generated");
+    expect(body.warnings.join(" ")).toContain("automatic correction");
+    expect(JSON.stringify(stub.calls[2]!.body)).toContain(
+      "non-zero air density",
+    );
   });
 
   it("returns 422 with the supported families for unsupported material", async () => {
+    vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
+    const stub = createFetchStub([
+      toolCallResponse("report_learning_intent", {
+        topic: "chemical equations",
+        family: "unknown",
+        concepts: [],
+        difficulty: "standard",
+        confidence: 0.98,
+      }),
+    ]);
+    vi.stubGlobal("fetch", stub.fetchImpl);
     const response = await POST(
       multipartRequest({
         prompt: "help me balance chemical equations",
@@ -362,7 +426,7 @@ describe("POST /api/compile", () => {
     expect(stub.calls).toHaveLength(2);
   });
 
-  it("never exposes provider/network details in fallback responses", async () => {
+  it("never exposes provider/network details in explicit AI errors", async () => {
     vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
     const stub = createFetchStub([
       new Error("stack trace API key provider-response-secret"),
@@ -374,13 +438,25 @@ describe("POST /api/compile", () => {
         gradeBand: "8-10",
       }),
     );
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(503);
     const raw = JSON.stringify(await response.json());
     expect(raw).not.toMatch(/stack trace|API key|provider-response-secret/);
-    expect(raw).toContain('"source":"validated-example"');
+    expect(raw).toContain('"code":"ai_unavailable"');
   });
 
   it("handles prompt-injection text without echoing markup", async () => {
+    vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
+    const stub = createFetchStub([
+      toolCallResponse("report_learning_intent", {
+        topic: "falling objects",
+        family: "drop",
+        concepts: ["free-fall"],
+        difficulty: "standard",
+        confidence: 0.8,
+      }),
+      toolCallResponse("emit_experiment_spec", dropDemo),
+    ]);
+    vi.stubGlobal("fetch", stub.fetchImpl);
     const response = await POST(
       multipartRequest({
         prompt:
@@ -388,10 +464,10 @@ describe("POST /api/compile", () => {
         gradeBand: "8-10",
       }),
     );
-    expect(response.status).toBe(200); // "falling" routes to drop
+    expect(response.status).toBe(502);
     const raw = JSON.stringify(await response.json());
     expect(raw).not.toContain("<script");
-    expect(raw).toContain('"source":"validated-example"');
+    expect(raw).toContain('"code":"ai_invalid_output"');
   });
 
   it("returns error messages free of markup characters", async () => {

@@ -40,15 +40,13 @@ import type {
 } from "@/lib/contracts/experiment";
 import { experimentSpecSchema } from "@/lib/contracts/experiment";
 import {
-  demoForPrompt,
   dropDemo,
-  pendulumDemo,
-  projectileDemo,
 } from "@/components/lab/demo-experiments";
 import { EvidenceChart } from "@/components/lab/EvidenceChart";
 import { SimulationErrorBoundary } from "@/components/lab/SimulationErrorBoundary";
 import {
   applyCounterfactual,
+  isVelocityFocusedDrop,
   PROJECTILE_AIR_DENSITY_KG_PER_CUBIC_METER,
   type SimulationEvidence,
   updateScenePath,
@@ -91,9 +89,9 @@ const compileStages = [
 ];
 
 const exampleMeta = [
-  { icon: CircleGauge, kicker: "FREE FALL", question: "Do heavier objects fall faster?", spec: dropDemo },
-  { icon: Target, kicker: "PROJECTILES", question: "Why does a thrown ball follow an arc?", spec: projectileDemo },
-  { icon: Atom, kicker: "OSCILLATION", question: "Does a heavier pendulum swing faster?", spec: pendulumDemo },
+  { id: "drop", icon: CircleGauge, kicker: "FREE FALL", question: "Do heavier objects fall faster?" },
+  { id: "projectile", icon: Target, kicker: "PROJECTILES", question: "Why does a thrown ball follow an arc?" },
+  { id: "pendulum", icon: Atom, kicker: "OSCILLATION", question: "Does a heavier pendulum swing faster?" },
 ];
 
 function phaseIndex(phase: Phase) {
@@ -213,7 +211,7 @@ function Landing({
   setImagePreview: (value: string | null) => void;
   error: string | null;
   setError: (value: string | null) => void;
-  compile: (spec?: ExperimentSpec) => void;
+  compile: (promptOverride?: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -316,8 +314,8 @@ function Landing({
           <p>Every lab begins with a prediction—because seeing an answer is not the same as changing your mind.</p>
         </div>
         <div className="example-grid">
-          {exampleMeta.map(({ icon: Icon, kicker, question, spec }, index) => (
-            <button key={spec.id} className="example-card" onClick={() => { setPrompt(question); compile(spec); }}>
+          {exampleMeta.map(({ id, icon: Icon, kicker, question }, index) => (
+            <button key={id} className="example-card" onClick={() => compile(question)}>
               <div className="example-index">0{index + 1}</div>
               <Icon size={22} />
               <span>{kicker}</span>
@@ -427,7 +425,9 @@ function PredictionPanel({
 }
 
 function chartTitle(spec: ExperimentSpec) {
-  if (spec.scene.family === "drop") return "Height vs. time";
+  if (spec.scene.family === "drop") {
+    return isVelocityFocusedDrop(spec) ? "Speed vs. time" : "Height vs. time";
+  }
   if (spec.scene.family === "projectile") {
     return "Position and height vs. time";
   }
@@ -446,6 +446,8 @@ function EvidencePanel({
   explanation,
   setExplanation,
   onEvaluate,
+  evaluating,
+  evaluationError,
 }: {
   spec: ExperimentSpec;
   evidence: SimulationEvidence;
@@ -453,6 +455,8 @@ function EvidencePanel({
   explanation: string;
   setExplanation: (value: string) => void;
   onEvaluate: () => void;
+  evaluating: boolean;
+  evaluationError: string | null;
 }) {
   return (
     <div className="panel-content evidence-panel">
@@ -475,8 +479,9 @@ function EvidencePanel({
       </div>
       <label htmlFor="explanation">What caused the result?</label>
       <textarea id="explanation" value={explanation} onChange={(event) => setExplanation(event.target.value)} placeholder={spec.prediction.reasoningPrompt} rows={3} />
-      <button className="primary-panel-button" disabled={explanation.trim().length < 12} onClick={onEvaluate}>
-        Check my explanation <ArrowRight size={16} />
+      {evaluationError && <p className="panel-error" role="alert">{evaluationError}</p>}
+      <button className="primary-panel-button" disabled={explanation.trim().length < 12 || evaluating} onClick={onEvaluate}>
+        {evaluating ? "Asking the AI evaluator…" : "Check my explanation"} <ArrowRight size={16} />
       </button>
     </div>
   );
@@ -570,6 +575,8 @@ function LabWorkspace({
   const [evidence, setEvidence] = useState<SimulationEvidence | null>(null);
   const [explanation, setExplanation] = useState("");
   const [evaluation, setEvaluation] = useState<EvaluationResponse | null>(null);
+  const [evaluating, setEvaluating] = useState(false);
+  const [evaluationError, setEvaluationError] = useState<string | null>(null);
   const [firstCorrect, setFirstCorrect] = useState(false);
   const [transferCorrect, setTransferCorrect] = useState(false);
   const [transferMode, setTransferMode] = useState(false);
@@ -695,17 +702,8 @@ function LabWorkspace({
   );
 
   const evaluate = async () => {
-    const nextHint = spec.scene.family === "drop"
-      ? "Change shape while holding mass constant."
-      : spec.scene.family === "projectile"
-        ? "Change one velocity component at a time."
-        : "Change length while holding mass constant.";
-    const fallback: EvaluationResponse = {
-      score: Math.min(0.94, 0.58 + Math.min(explanation.trim().split(/\s+/).length, 24) / 70),
-      criteria: { evidence: true, causality: /acceler|gravity|velocity|period|mass|length/i.test(explanation), transfer: explanation.length > 45 },
-      feedback: `You connected the observed evidence to the underlying mechanism. The key refinement is that ${spec.misconception.description.toLowerCase()}`,
-      hint: nextHint,
-    };
+    setEvaluating(true);
+    setEvaluationError(null);
     try {
       const response = await fetch("/api/evaluate", {
         method: "POST",
@@ -713,20 +711,31 @@ function LabWorkspace({
         body: JSON.stringify({
           experimentId: spec.id,
           observedOutcome: evidence?.outcomeKey,
+          question,
+          objective: spec.objective,
+          evidenceSummary: evidence?.summary,
           studentExplanation: explanation,
           misconception: spec.misconception,
         }),
       });
       if (!response.ok) {
-        setEvaluation(fallback);
-      } else {
-        const data = (await response.json()) as EvaluationResponse;
-        setEvaluation(data);
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: { message?: string } }
+          | null;
+        setEvaluationError(
+          payload?.error?.message ??
+            "The AI evaluator could not respond. Please retry.",
+        );
+        return;
       }
+      const data = (await response.json()) as EvaluationResponse;
+      setEvaluation(data);
+      setPhase("explaining");
     } catch {
-      setEvaluation(fallback);
+      setEvaluationError("The AI evaluator could not be reached. Please retry.");
+    } finally {
+      setEvaluating(false);
     }
-    setPhase("explaining");
   };
 
   const beginCounterfactual = () => {
@@ -904,7 +913,7 @@ function LabWorkspace({
                 running={capturing}
               />
             )}
-            {phase === "evidence" && evidence && <EvidencePanel spec={spec} evidence={evidence} predictionLabel={predictionLabel} explanation={explanation} setExplanation={setExplanation} onEvaluate={evaluate} />}
+            {phase === "evidence" && evidence && <EvidencePanel spec={spec} evidence={evidence} predictionLabel={predictionLabel} explanation={explanation} setExplanation={setExplanation} onEvaluate={evaluate} evaluating={evaluating} evaluationError={evaluationError} />}
             {phase === "explaining" && evaluation && evidence && <FeedbackPanel spec={spec} evidence={evidence} predictionLabel={predictionLabel} evaluation={evaluation} onChallenge={beginCounterfactual} />}
             {phase === "complete" && <CompletePanel spec={spec} firstCorrect={firstCorrect} transferCorrect={transferCorrect} mastery={mastery} onRestart={onExit} />}
           </div>
@@ -963,18 +972,19 @@ export function CounterfactualLab() {
     setImagePreview(null);
   };
 
-  const compile = async (directSpec?: ExperimentSpec) => {
+  const compile = async (promptOverride?: string) => {
+    const requestedPrompt = promptOverride?.trim() || prompt.trim();
+    if (promptOverride) setPrompt(promptOverride);
     setError(null);
     setCompilerNotice(null);
     setPhase("compiling");
     setStage(0);
-    let generated: ExperimentSpec | null = directSpec ?? null;
+    let generated: ExperimentSpec | null = null;
     let compileFailure: string | null = null;
     let nextCompilerNotice: string | null = null;
     const compileRequest = async () => {
-      if (directSpec) return;
       const form = new FormData();
-      form.set("prompt", prompt.trim() || "Explain the mechanics in this diagram.");
+      form.set("prompt", requestedPrompt || "Explain the mechanics in this diagram.");
       form.set("gradeBand", gradeBand);
       if (image) form.set("image", image);
       try {
@@ -989,6 +999,11 @@ export function CounterfactualLab() {
           return;
         }
         const payload = (await response.json()) as CompileResponse;
+        if (payload.provenance.source !== "generated") {
+          compileFailure =
+            "The server did not return an AI-generated experiment. Please retry.";
+          return;
+        }
         const parsed = experimentSpecSchema.safeParse(payload.spec);
         if (!parsed.success) {
           compileFailure =
@@ -998,14 +1013,12 @@ export function CounterfactualLab() {
         generated = parsed.data;
         if (payload.warnings.length > 0) {
           nextCompilerNotice = payload.warnings.join(" ");
-        } else if (payload.provenance.source === "generated") {
-          nextCompilerNotice = `AI-generated${payload.provenance.model ? ` with ${payload.provenance.model}` : ""} · physics validated`;
         } else {
-          nextCompilerNotice = "Using a bundled, physics-validated example.";
+          nextCompilerNotice = `AI-generated${payload.provenance.model ? ` with ${payload.provenance.model}` : ""} · physics validated`;
         }
       } catch {
-        nextCompilerNotice =
-          "Compiler offline · using a bundled, physics-validated example.";
+        compileFailure =
+          "The AI experiment generator could not be reached. Please retry.";
       }
     };
     const request = compileRequest();
@@ -1019,12 +1032,15 @@ export function CounterfactualLab() {
       setPhase("input");
       return;
     }
-    const fallback = directSpec ?? demoForPrompt(prompt || image?.name || "drop");
-    if (!directSpec && !generated && !nextCompilerNotice) {
-      nextCompilerNotice = "Using a bundled, physics-validated example.";
+    if (!generated) {
+      setError(
+        "The AI did not return an experiment. Please retry or rephrase the question.",
+      );
+      setPhase("input");
+      return;
     }
     setCompilerNotice(nextCompilerNotice);
-    setSpec(structuredClone(generated ?? fallback));
+    setSpec(structuredClone(generated));
     setImage(null);
     if (imagePreview) URL.revokeObjectURL(imagePreview);
     setImagePreview(null);
