@@ -1,15 +1,9 @@
 # Devpost submission copy
 
-> Paste-ready copy for the Devpost form. Verified against
-> `codex/integration-ui` @ `23542fd`. Anything marked **[branch-dependent]**
-> must be re-checked (or cut) if the final merge does not include it.
->
-> ⚠️ The official rules page
-> (https://prometheus-july-ai-challenge.devpost.com/rules) could not be
-> fetched from the build environment (Cloudflare 403 / blocked egress). The
-> judging-criterion mapping below uses Devpost's standard four criteria —
-> **verify the exact criteria on the live rules page before submitting** and
-> adjust headings if they differ. See `judge-evidence-map.md`.
+> Paste-ready copy for the Devpost form. Revalidated against
+> `agent/counterfactual-release-candidate` and the official rules page on
+> July 15, 2026. The video must be no longer than two minutes; projects are due
+> July 30 at 11:59 PM with no extensions.
 
 ## Project title
 
@@ -60,12 +54,13 @@ diagrams) and a spec compiler whose output is forced through a JSON tool
 schema into a single declarative `ExperimentSpec` contract shared with the
 renderer. Every spec is validated against physics bounds, allowlisted scene
 paths, and content-safety rules, given one repair round with the exact
-validator errors, and otherwise replaced by a bundled, pre-validated example
-— with the fallback disclosed to the user. A deterministic physics module,
+validator errors, and otherwise returned as a separate, pre-validated example
+offer. The UI leaves the custom question untouched and requires the learner to
+explicitly open that demo under its own canonical question. A deterministic physics module,
 shared by the renderer and the grader, computes every "correct" answer.
 Mastery is Bayesian Knowledge Tracing implemented as pure functions and
-persisted in the browser. 188 unit and API tests run with all provider calls
-mocked, plus a Playwright end-to-end flow.
+persisted in the browser. 201 unit and API tests run with all provider calls
+mocked, plus four isolated Playwright end-to-end flows.
 
 ## How AI/ML is used
 
@@ -111,10 +106,11 @@ server silently overwrites it.
 - The determinism guarantee: the simulation the learner watches and the
   grader that scores them share one physics implementation, so they can
   never disagree.
-- Honest failure modes: no API key, provider timeout, or a model that emits
-  garbage all degrade to bundled validated examples — disclosed in the UI,
-  never silent, and the whole app remains demoable offline.
-- 188 passing tests with zero live provider calls, covering malformed model
+- Honest failure modes: no API key, provider timeout, or invalid model output
+  produces a disclosed, separately selected validated-demo offer. The app
+  never relabels a custom question, and offline grading is separately selected
+  and labeled.
+- 201 passing tests with zero live provider calls, covering malformed model
   output, repair, timeout, prompt injection, and API boundary abuse.
 
 ## What we learned
@@ -133,8 +129,8 @@ freezing one Zod schema as the boundary let three parallel workstreams
   a scene schema, a deterministic outcome function, and a bundled example.
 - Classroom mode: shareable experiment links and a teacher view of the
   misconceptions a class actually holds, powered by the same BKT data.
-- Provider-retry and compile caching are already written on a side branch
-  **[branch-dependent]** and are next to land after the hackathon merge.
+- More experiment families, teacher-facing assignment links, and shared
+  classroom misconception summaries after validating the three-family core.
 
 ## Built with
 
@@ -142,13 +138,13 @@ Next.js 15 · React 19 · TypeScript (strict) · React Three Fiber · Rapier ·
 Recharts · Zod · Featherless AI (OpenAI-compatible chat completions, text +
 vision models) · Vitest · Playwright
 
-## Judging-criterion mapping (verify criteria wording on the rules page)
+## Official judging-criterion mapping
 
-| Criterion (standard Devpost) | Our evidence |
+| Criterion | Our evidence |
 | --- | --- |
-| Quality of the Idea | Prediction-first learning loop built on a documented pedagogy insight (misconception confrontation + transfer test), not another chat wrapper; "0 answers handed to you" is the design principle. |
-| Design & User Experience | Six-step progress rail (Ask → Predict → Test → Evidence → Change → Explain), evidence notebook pairing 3D replay with synchronized charts, locked controls during runs, grade-band toggle, honest fallback messaging. See the three screenshots in `docs/assets/submission/`. |
-| Technological Implementation | AI-to-simulation compiler with schema-forced output, allowlisted validation, one-round repair, deterministic outcome engine shared between renderer and grader, BKT mastery, 188 mocked-provider tests + Playwright e2e. |
-| Potential Impact | Works offline/free-tier by design (bundled validated examples), browser-only persistence, three misconception-centered families with a contract built for adding more. |
+| Educational Impact — 25 points | Prediction-first misconception confrontation, synchronized evidence, explanation, transfer test, and BKT mastery address the difference between reading an answer and revising a mental model. |
+| Creative Use of AI/ML — 25 points | AI is core: text or diagram → question-aligned declarative experiment, then rubric feedback. Deterministic physics constrains rather than replaces the model's creative role. |
+| Technical Execution — 25 points | Strict API and schema validation, one repair, deterministic outcomes, explicit outage recovery, 201 mocked-provider tests, four Playwright flows, and a production build. |
+| Pitch & Demo — 25 points | A rehearsed 1:52 story reaches simulation before 30 seconds, shows a wrong prediction, evidence, explanation, one-variable counterfactual, and mastery change. |
 
 Full claim-by-claim evidence with file paths: `judge-evidence-map.md`.

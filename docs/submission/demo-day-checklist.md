@@ -29,15 +29,20 @@ or deployed commit.
 - [ ] `GET <production-url>/api/health` returns
       `{"status":"ok","aiProviderConfigured":true}`
 - [ ] If `aiProviderConfigured` is `false`: the demo still works — switch to
-      the backup (fixture) script and say the fallback line honestly
+      the explicit validated-demo script and say the disclosure line honestly
 - [ ] Provider warm-up: ~10 minutes before recording, run one real compile
       (typed question) end-to-end and one `/api/evaluate`; note the compile
       latency — if it exceeds ~8 s, pre-commit to the backup path
 
-## Deterministic fixture fallback (rehearse this FIRST)
+## Explicit validated-demo path (rehearse this FIRST)
 
 - [ ] With the key removed locally (`npm run build && npm run start`, no
-      `FEATHERLESS_API_KEY`): all three example cards run end-to-end
+      provider credentials): each example card shows the provider notice and a
+      separate **Open the validated … demo** action
+- [ ] The original custom question is never shown as the title of the validated
+      demo; the demo uses its canonical question
+- [ ] AI feedback fails honestly, and **Continue with an offline rubric** is a
+      separate action whose result says **Offline rubric check**
 - [ ] Galileo Drop shows 1.28 s / 1.28 s impacts in vacuum
 - [ ] Air counterfactual lands the orange (heavy) sphere first
 - [ ] Fresh profile mastery reads 25% → 18% → 58% along the demo path
@@ -72,7 +77,7 @@ or deployed commit.
 
 ## Recording backup
 
-- [ ] Two takes minimum: one primary (live provider), one backup (fixture
+- [ ] Two takes minimum: one primary (live provider), one backup (validated demo
       path) — keep both files
 - [ ] Second capture method running (OS screen recorder alongside OBS, or a
       second machine) so a codec failure cannot destroy the only take
@@ -80,12 +85,12 @@ or deployed commit.
 
 ## Video duration
 
-- [ ] Final cut between **1:50 and 1:55** (script targets 1:52)
+- [ ] Final cut between **1:50 and 1:55** (script targets 1:52 and the official
+      maximum is 2:00)
 - [ ] Ends with the exact line: "Counterfactual Lab: ask a question, change
       the world, prove it."
-- [ ] Check the hackathon's maximum video length on the official rules page
-      (unreachable from the build environment — verify manually) and confirm
-      1:55 is within it
+- [ ] Confirm the export itself is no longer than 2:00; judges will not watch
+      anything after the two-minute mark
 
 ## Repository
 
@@ -98,9 +103,10 @@ or deployed commit.
 ## Devpost fields
 
 - [ ] Copy from `devpost-submission.md` (title, tagline, all sections)
-- [ ] Re-verify the judging criteria on the live rules page and adjust the
-      criterion mapping if the names differ (build environment could not
-      fetch the rules page — see `judge-evidence-map.md` header)
+- [ ] Map the final entry to the verified criteria: Educational Impact,
+      Creative Use of AI/ML, Technical Execution, and Pitch & Demo
+- [ ] Submit before July 30 at 11:59 PM; the rules state no extensions (submit
+      early because the page does not state a timezone in the rules text)
 - [ ] Video URL uploaded and set public/unlisted per the rules
 - [ ] Repo link, try-it-out link (production URL), and the three screenshots
       attached
@@ -111,7 +117,7 @@ or deployed commit.
 - [ ] `GET /api/health` → `{"status":"ok", ...}` on production
 - [ ] Landing loads in under 3 s on venue network
 - [ ] One full example-card run: predict → run → evidence → explain →
-      counterfactual → complete, no console errors
+      explicit offline rubric → counterfactual → complete, no application errors
 - [ ] One typed-question compile (if provider configured) returns an
       experiment or a *disclosed* fallback — either is demoable
 - [ ] Off-topic question ("balance chemical equations") returns the polite
