@@ -273,8 +273,12 @@ function Landing({
             </div>
           </div>
           <label htmlFor="experiment-question">What do you want to understand?</label>
+          <p id="experiment-scope" className="prompt-scope">
+            Supported now: falling objects, projectile motion, and pendulums.
+          </p>
           <textarea
             id="experiment-question"
+            aria-describedby="experiment-scope"
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             placeholder="Why don’t heavier objects fall faster?"

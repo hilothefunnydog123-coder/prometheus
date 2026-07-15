@@ -35,6 +35,17 @@ describe("heuristicIntent", () => {
     ).toBe("drop");
   });
 
+  it.each([
+    ["How does air resistance affect terminal velocity?", "drop"],
+    ["What launch angle gives a soccer ball the most range?", "projectile"],
+    [
+      "Why does changing a metronome's string length change its timing?",
+      "pendulum",
+    ],
+  ] as const)("routes an original mechanics question: %s", (question, family) => {
+    expect(heuristicIntent(question, false).family).toBe(family);
+  });
+
   it("routes off-topic text to unknown with low confidence", () => {
     const intent = heuristicIntent("help with chemistry homework", false);
     expect(intent.family).toBe("unknown");
