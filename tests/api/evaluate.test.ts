@@ -12,10 +12,13 @@ import {
 // never update mastery. If anyone wires BKT into this route, these spies trip.
 vi.mock("@/lib/mastery/bkt", { spy: true });
 
-function jsonRequest(payload: unknown): Request {
+function jsonRequest(
+  payload: unknown,
+  headers: Record<string, string> = {},
+): Request {
   return new Request("http://test.local/api/evaluate", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(payload),
   });
 }
@@ -121,6 +124,37 @@ describe("POST /api/evaluate", () => {
     expect(providerPayload).toContain(validPayload.question);
     expect(providerPayload).toContain(validPayload.evidenceSummary);
     expect(vi.mocked(bkt.updateMastery)).not.toHaveBeenCalled();
+  });
+
+  it("returns bounded deterministic feedback only after explicit offline opt-in", async () => {
+    const response = await POST(
+      jsonRequest(validPayload, {
+        "x-counterfactual-feedback-mode": "heuristic",
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-counterfactual-feedback-source")).toBe(
+      "heuristic",
+    );
+    const body = (await response.json()) as EvaluationResponse;
+    expect(body.score).toBeGreaterThanOrEqual(0);
+    expect(body.score).toBeLessThanOrEqual(1);
+    expect(Object.keys(body.criteria)).toHaveLength(
+      dropFixture.misconception.explanationRubric.length,
+    );
+    expect(body.feedback).toContain("grading is offline");
+  });
+
+  it("rejects unknown feedback modes", async () => {
+    const response = await POST(
+      jsonRequest(validPayload, {
+        "x-counterfactual-feedback-mode": "silent-fallback",
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as ErrorBody).error.code).toBe(
+      "invalid_feedback_mode",
+    );
   });
 
   it("rejects non-JSON content types with 415", async () => {

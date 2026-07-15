@@ -25,10 +25,10 @@ import {
  * analyzeInput: untrusted learner text (and optionally an image, e.g. a
  * photo of a homework problem) -> validated LearningIntent.
  *
- * In the default library mode, provider failures degrade to the keyword
- * heuristic for offline tooling. Learner-facing API routes set
- * fallbackMode="error", guaranteeing that every accepted experiment began
- * with a real model analysis.
+ * Provider failures degrade to the keyword heuristic so the compiler can
+ * choose a safe validated example. The learner-facing UI never opens that
+ * example automatically: generated provenance is required for the custom
+ * question, and an explicit second action is required for the demo path.
  */
 
 export const SUPPORTED_IMAGE_MIME_TYPES = [

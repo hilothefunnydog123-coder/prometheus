@@ -30,10 +30,11 @@ import {
  *   gradeBand: required, "8-10" | "11-12"
  *   image:     optional file, image/png | image/jpeg | image/webp, <= 4 MB
  *
- * Success 200: { spec, warnings, provenance } (CompileResponse). The spec
- * is ALWAYS a model-generated, validated ExperimentSpec with server-computed
- * correctOutcomeKey values. Provider trouble is returned explicitly; this
- * route never relabels a bundled example as a response to a custom question.
+ * Success 200: { spec, warnings, provenance } (CompileResponse). Generated
+ * specs have server-computed correctOutcomeKey values. Provider trouble or a
+ * failed repair returns a separate validated example with explicit provenance;
+ * the frontend requires an additional learner action before opening it and
+ * never relabels it as the answer to the custom question.
  *
  * Unsupported educational material returns 422 with a safe message naming
  * the three supported families.
@@ -257,7 +258,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     const intent = await analyzeInput(prompt, image, {
       signal: request.signal,
-      fallbackMode: "error",
     });
     if (intent.family === "unknown") {
       return errorResponse(
@@ -269,7 +269,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const response = await compileExperiment(
       intent,
       { gradeBand, sourceQuestion: prompt },
-      { signal: request.signal, fallbackMode: "error" },
+      { signal: request.signal },
     );
     return NextResponse.json(response, { status: 200 });
   } catch (error) {

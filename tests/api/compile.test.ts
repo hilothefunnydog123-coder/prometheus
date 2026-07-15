@@ -97,17 +97,18 @@ afterEach(() => {
 });
 
 describe("POST /api/compile", () => {
-  it("requires an AI provider instead of substituting a fixture", async () => {
+  it("returns a disclosed validated example when credentials are missing", async () => {
     const response = await POST(
       multipartRequest({
         prompt: "does a heavier pendulum bob swing faster?",
         gradeBand: "8-10",
       }),
     );
-    expect(response.status).toBe(503);
-    const body = (await response.json()) as ErrorBody;
-    expect(body.error.code).toBe("ai_not_configured");
-    expect(body.error.message).not.toContain("validated example");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as CompileResponse;
+    expect(body.provenance.source).toBe("validated-example");
+    expect(body.spec.scene.family).toBe("pendulum");
+    expect(body.warnings.join(" ")).toContain("validated example");
   });
 
   it("returns generated provenance when the provider succeeds", async () => {
@@ -426,7 +427,7 @@ describe("POST /api/compile", () => {
     expect(stub.calls).toHaveLength(2);
   });
 
-  it("never exposes provider/network details in explicit AI errors", async () => {
+  it("never exposes provider/network details in disclosed fallback responses", async () => {
     vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
     const stub = createFetchStub([
       new Error("stack trace API key provider-response-secret"),
@@ -438,10 +439,10 @@ describe("POST /api/compile", () => {
         gradeBand: "8-10",
       }),
     );
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(200);
     const raw = JSON.stringify(await response.json());
     expect(raw).not.toMatch(/stack trace|API key|provider-response-secret/);
-    expect(raw).toContain('"code":"ai_unavailable"');
+    expect(raw).toContain('"source":"validated-example"');
   });
 
   it("handles prompt-injection text without echoing markup", async () => {
@@ -464,10 +465,10 @@ describe("POST /api/compile", () => {
         gradeBand: "8-10",
       }),
     );
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(200);
     const raw = JSON.stringify(await response.json());
     expect(raw).not.toContain("<script");
-    expect(raw).toContain('"code":"ai_invalid_output"');
+    expect(raw).toContain('"source":"validated-example"');
   });
 
   it("returns error messages free of markup characters", async () => {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   evaluateExplanation,
   evaluationInputSchema,
+  heuristicEvaluation,
 } from "@/lib/ai/evaluate-explanation";
 import {
   MissingCredentialsError,
@@ -43,6 +44,7 @@ import {
 export const runtime = "nodejs";
 
 const MAX_BODY_BYTES = 64 * 1024;
+const FEEDBACK_MODE_HEADER = "x-counterfactual-feedback-mode";
 
 function errorResponse(
   status: number,
@@ -118,6 +120,21 @@ export async function POST(request: Request): Promise<NextResponse> {
       "invalid_request",
       "Expected { experimentId, observedOutcome?, studentExplanation, misconception } within documented limits.",
     );
+  }
+
+  const feedbackMode = request.headers.get(FEEDBACK_MODE_HEADER);
+  if (feedbackMode !== null && feedbackMode !== "heuristic") {
+    return errorResponse(
+      400,
+      "invalid_feedback_mode",
+      "The optional feedback mode is invalid.",
+    );
+  }
+  if (feedbackMode === "heuristic") {
+    return NextResponse.json(heuristicEvaluation(parsed.data), {
+      status: 200,
+      headers: { "x-counterfactual-feedback-source": "heuristic" },
+    });
   }
 
   try {

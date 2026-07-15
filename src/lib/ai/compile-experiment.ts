@@ -83,7 +83,7 @@ function fixtureResponse(
   return {
     spec: validated.spec,
     warnings: [
-      `${FALLBACK_PHRASES[reason]} You are running a validated example experiment instead.`,
+      `${FALLBACK_PHRASES[reason]} A separate validated example experiment is available instead.`,
     ],
     provenance: {
       source: "validated-example",
