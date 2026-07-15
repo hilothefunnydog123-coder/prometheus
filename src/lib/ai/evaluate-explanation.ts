@@ -1,36 +1,38 @@
-import { getFeatherlessConfig } from "./config";
-import type { ExperimentFamily } from "./contracts/experiment-spec";
+import { z } from "zod";
 import {
-  deriveEvaluationResult,
-  explanationEvaluationSchema,
-  type EvaluationResult,
-  type ExplanationEvaluation,
-} from "./contracts/evaluation";
+  misconceptionSchema,
+  type EvaluationResponse,
+  type MisconceptionSpec,
+} from "@/lib/contracts/experiment";
+import { getFeatherlessConfig } from "./config";
 import { chatCompletion } from "./featherless-client";
 import {
   EVALUATE_SYSTEM_PROMPT,
-  GRADE_EXPLANATION_TOOL,
+  gradeExplanationTool,
   sanitizeUserText,
   wrapUntrusted,
 } from "./prompts";
+import { safeText } from "./text-rules";
 
 /**
- * evaluateExplanation: learner explanation -> structured rubric feedback.
+ * evaluateExplanation: learner explanation -> renderer-contract
+ * EvaluationResponse ({ score, criteria, feedback, hint }).
  *
- * Generates feedback only — it never updates mastery. The masterySignal in
- * the result is advisory; applying it via the BKT module is the caller's
- * decision (see src/lib/mastery/bkt.ts).
+ * Rubric-based and deterministic where it matters: the model only judges
+ * each rubric criterion true/false and writes feedback/hint text — the
+ * score is always computed server-side as passed/total. The evaluator
+ * NEVER updates mastery; applying results to BKT state is the frontend's
+ * decision (src/lib/mastery/bkt.ts stays pure).
  *
- * Like analyzeInput, this function is total: provider failures degrade to a
- * deterministic heuristic rubric marked source: "heuristic".
+ * Total function: provider failures degrade to a deterministic keyword
+ * heuristic with the same response shape.
  */
 
-export interface EvaluationContext {
-  family: ExperimentFamily;
-  /** The explanation prompt or prediction question the learner answered. */
-  question: string;
-  /** Concept slugs from the ExperimentSpec, used by the heuristic grader. */
-  concepts: readonly string[];
+export interface EvaluationInput {
+  experimentId: string;
+  observedOutcome?: string;
+  studentExplanation: string;
+  misconception: MisconceptionSpec;
 }
 
 export interface EvaluateDeps {
@@ -41,54 +43,94 @@ export interface EvaluateDeps {
 const MAX_EXPLANATION_LENGTH = 4000;
 
 /**
- * Deterministic fallback grader: crude but honest. Scores concept-keyword
- * coverage and explanation substance, detects nothing it cannot detect, and
- * says so in the feedback.
+ * Stable, ordered criteria keys derived from the rubric text. The frontend
+ * reads criteria by insertion order against the rubric array, so order is
+ * preserved and each rubric item maps to exactly one key.
  */
-export function heuristicEvaluation(
-  explanation: string,
-  context: EvaluationContext,
-): ExplanationEvaluation {
-  const text = sanitizeUserText(explanation).toLowerCase();
-  const words = text.split(/[^a-z0-9]+/).filter((w) => w.length > 2);
-
-  const conceptWords = context.concepts.flatMap((c) => c.split(/[-_]/));
-  const coveredConcepts = conceptWords.filter((w) => text.includes(w)).length;
-  const coverageScore =
-    conceptWords.length === 0
-      ? 1
-      : Math.min(3, Math.round((coveredConcepts / conceptWords.length) * 3));
-
-  const substanceScore = words.length >= 40 ? 2 : words.length >= 15 ? 1 : 0;
-
-  return explanationEvaluationSchema.parse({
-    scores: {
-      correctness: Math.min(coverageScore, 2),
-      mechanism: Math.min(substanceScore, 2),
-      vocabulary: coverageScore,
-    },
-    misconceptions: [],
-    feedback:
-      "Automated grading is offline, so this is a rough keyword-based score. Compare your explanation with what the simulation showed and check that you named the cause, not just the result.",
+export function criteriaKeys(rubric: readonly string[]): string[] {
+  const seen = new Set<string>();
+  return rubric.map((item, index) => {
+    let key =
+      item
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-+|-+$)/g, "")
+        .slice(0, 40) || `criterion-${index + 1}`;
+    if (seen.has(key)) key = `${key}-${index + 1}`;
+    seen.add(key);
+    return key;
   });
 }
 
-export async function evaluateExplanation(
-  explanation: string,
-  context: EvaluationContext,
-  deps: EvaluateDeps = {},
-): Promise<EvaluationResult> {
-  const trimmed = sanitizeUserText(explanation).slice(
-    0,
-    MAX_EXPLANATION_LENGTH,
+function toResponse(
+  rubric: readonly string[],
+  passes: readonly boolean[],
+  feedback: string,
+  hint: string,
+): EvaluationResponse {
+  const keys = criteriaKeys(rubric);
+  const criteria: Record<string, boolean> = {};
+  keys.forEach((key, index) => {
+    criteria[key] = passes[index] ?? false;
+  });
+  const passed = passes.filter(Boolean).length;
+  const score =
+    rubric.length === 0 ? 0 : Math.round((passed / rubric.length) * 100) / 100;
+  return { score, criteria, feedback, hint };
+}
+
+const DEFAULT_HINT =
+  "Change one variable at a time and watch how the measured value responds.";
+
+/**
+ * Deterministic fallback grader: a rubric criterion passes when the
+ * explanation contains at least one substantive word from the criterion
+ * text. Crude but honest — the feedback says grading is offline.
+ */
+export function heuristicEvaluation(input: EvaluationInput): EvaluationResponse {
+  const explanation = sanitizeUserText(input.studentExplanation).toLowerCase();
+  const rubric = input.misconception.explanationRubric;
+  const passes = rubric.map((item) => {
+    const tokens = item
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length > 3);
+    return tokens.some((token) => explanation.includes(token));
+  });
+  return toResponse(
+    rubric,
+    passes,
+    `Automated grading is offline, so this rough score only checks whether your explanation mentions the key ideas. Compare your reasoning with the evidence you just observed and revisit: ${input.misconception.title}.`,
+    DEFAULT_HINT,
   );
+}
+
+export async function evaluateExplanation(
+  input: EvaluationInput,
+  deps: EvaluateDeps = {},
+): Promise<EvaluationResponse> {
+  // Defensive re-validation: the misconception arrives from the client.
+  const misconception = misconceptionSchema.parse(input.misconception);
+  const trimmedInput: EvaluationInput = {
+    ...input,
+    misconception,
+    studentExplanation: sanitizeUserText(input.studentExplanation).slice(
+      0,
+      MAX_EXPLANATION_LENGTH,
+    ),
+  };
+
   const config = getFeatherlessConfig(deps.env);
   if (!config) {
-    return deriveEvaluationResult(
-      heuristicEvaluation(trimmed, context),
-      "heuristic",
-    );
+    return heuristicEvaluation(trimmedInput);
   }
+
+  const rubric = misconception.explanationRubric;
+  const resultSchema = z.object({
+    criteria: z.array(z.boolean()).length(rubric.length),
+    feedback: safeText(10, 400),
+    hint: safeText(5, 200),
+  });
 
   try {
     const result = await chatCompletion(
@@ -100,38 +142,39 @@ export async function evaluateExplanation(
           {
             role: "user",
             content: [
-              `Experiment family: ${context.family}`,
-              `Question the learner answered: ${sanitizeUserText(context.question)}`,
-              `Target concepts: ${context.concepts.join(", ") || "(none)"}`,
+              `Misconception probed: ${misconception.title} — ${misconception.description}`,
+              `Observed outcome key: ${
+                trimmedInput.observedOutcome
+                  ? sanitizeUserText(trimmedInput.observedOutcome).slice(0, 60)
+                  : "(not reported)"
+              }`,
+              "Rubric criteria (grade each, in order):",
+              ...rubric.map((item, index) => `${index + 1}. ${item}`),
               "Learner explanation:",
-              wrapUntrusted(trimmed),
+              wrapUntrusted(trimmedInput.studentExplanation),
             ].join("\n"),
           },
         ],
-        tool: GRADE_EXPLANATION_TOOL,
-        maxTokens: 600,
+        tool: gradeExplanationTool(rubric.length),
+        maxTokens: 500,
       },
       deps.fetchImpl,
     );
     if (result.toolArguments === null) {
-      return deriveEvaluationResult(
-        heuristicEvaluation(trimmed, context),
-        "heuristic",
-      );
+      return heuristicEvaluation(trimmedInput);
     }
     const candidate: unknown = JSON.parse(result.toolArguments);
-    const parsed = explanationEvaluationSchema.safeParse(candidate);
+    const parsed = resultSchema.safeParse(candidate);
     if (!parsed.success) {
-      return deriveEvaluationResult(
-        heuristicEvaluation(trimmed, context),
-        "heuristic",
-      );
+      return heuristicEvaluation(trimmedInput);
     }
-    return deriveEvaluationResult(parsed.data, "model");
-  } catch {
-    return deriveEvaluationResult(
-      heuristicEvaluation(trimmed, context),
-      "heuristic",
+    return toResponse(
+      rubric,
+      parsed.data.criteria,
+      parsed.data.feedback,
+      parsed.data.hint,
     );
+  } catch {
+    return heuristicEvaluation(trimmedInput);
   }
 }
