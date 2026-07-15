@@ -123,6 +123,12 @@ variable is always read from declarative data (`prediction.testChange` or
 - **No live AI in tests/CI**: unit tests inject a fetch stub; route tests
   stub global fetch to fail loudly. The live eval script is opt-in and
   refuses to run when `CI` is set.
+- **Provider resilience & caching**: transient provider errors
+  (429/500/502/503/504) get exactly one retry after 250 ms — timeouts are
+  never retried. Identical compile requests (prompt + gradeBand + image
+  bytes) are served from a per-instance TTL/LRU cache (50 entries, 10 min);
+  only `provenance.source = "generated"` responses are cached, so fallbacks
+  and 422 rejections never stick.
 
 ### Environment variables
 

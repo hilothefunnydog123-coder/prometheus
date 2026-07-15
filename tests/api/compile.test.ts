@@ -4,6 +4,7 @@ import {
   experimentSpecSchema,
   type CompileResponse,
 } from "@/lib/contracts/experiment";
+import { compileCache } from "@/lib/ai/compile-cache";
 import { pendulumFixture } from "@/lib/fixtures";
 import {
   createFetchStub,
@@ -32,6 +33,7 @@ interface ErrorBody {
 }
 
 beforeEach(() => {
+  compileCache.clear();
   vi.stubEnv("FEATHERLESS_API_KEY", "");
   vi.stubGlobal(
     "fetch",
@@ -97,6 +99,72 @@ describe("POST /api/compile", () => {
     const body = (await response.json()) as CompileResponse;
     expect(body.provenance.source).toBe("generated");
     expect(body.provenance.model).toBeTruthy();
+    expect(stub.calls).toHaveLength(2);
+  });
+
+  it("serves repeated identical requests from the cache without provider calls", async () => {
+    vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
+    const stub = createFetchStub([
+      toolCallResponse("report_learning_intent", {
+        topic: "pendulum periods",
+        family: "pendulum",
+        concepts: ["pendulum-period"],
+        difficulty: "standard",
+        confidence: 0.9,
+      }),
+      toolCallResponse("emit_experiment_spec", pendulumFixture),
+    ]);
+    vi.stubGlobal("fetch", stub.fetchImpl);
+
+    const request = () =>
+      multipartRequest({
+        prompt: "teach me about pendulum periods",
+        gradeBand: "8-10",
+      });
+
+    const first = (await (await POST(request())).json()) as CompileResponse;
+    expect(stub.calls).toHaveLength(2);
+
+    const second = (await (await POST(request())).json()) as CompileResponse;
+    expect(stub.calls).toHaveLength(2); // no additional provider calls
+    expect(second).toEqual(first);
+
+    // A different gradeBand is a different cache identity.
+    await POST(
+      multipartRequest({
+        prompt: "teach me about pendulum periods",
+        gradeBand: "11-12",
+      }),
+    );
+    expect(stub.calls.length).toBeGreaterThan(2);
+  });
+
+  it("never caches fallback responses", async () => {
+    const request = () =>
+      multipartRequest({
+        prompt: "why does a pendulum swing so steadily?",
+        gradeBand: "8-10",
+      });
+    const first = (await (await POST(request())).json()) as CompileResponse;
+    expect(first.provenance.source).toBe("validated-example");
+    expect(compileCache.size).toBe(0);
+
+    // With the provider now available, the same request compiles live
+    // instead of being served a stale cached fallback.
+    vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
+    const stub = createFetchStub([
+      toolCallResponse("report_learning_intent", {
+        topic: "pendulum periods",
+        family: "pendulum",
+        concepts: ["pendulum-period"],
+        difficulty: "standard",
+        confidence: 0.9,
+      }),
+      toolCallResponse("emit_experiment_spec", pendulumFixture),
+    ]);
+    vi.stubGlobal("fetch", stub.fetchImpl);
+    const second = (await (await POST(request())).json()) as CompileResponse;
+    expect(second.provenance.source).toBe("generated");
     expect(stub.calls).toHaveLength(2);
   });
 

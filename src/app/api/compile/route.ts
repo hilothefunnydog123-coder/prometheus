@@ -6,6 +6,7 @@ import {
   type ImageInput,
   type SupportedImageMimeType,
 } from "@/lib/ai/analyze-input";
+import { CompileCache, compileCache } from "@/lib/ai/compile-cache";
 import { compileExperiment } from "@/lib/ai/compile-experiment";
 import { escapeHtml } from "@/lib/ai/errors";
 
@@ -141,6 +142,14 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   try {
+    // Identical requests (same prompt, band, and image bytes) are served
+    // from the in-memory cache; only "generated" responses are ever stored.
+    const cacheKey = CompileCache.key(promptEntry, gradeBand, image?.base64Data);
+    const cached = compileCache.get(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached, { status: 200 });
+    }
+
     const intent = await analyzeInput(promptEntry, image);
     if (intent.family === "unknown") {
       return errorResponse(
@@ -150,6 +159,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
     const response = await compileExperiment(intent, { gradeBand });
+    if (response.provenance.source === "generated") {
+      compileCache.set(cacheKey, response);
+    }
     return NextResponse.json(response, { status: 200 });
   } catch {
     return errorResponse(
