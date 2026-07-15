@@ -190,9 +190,12 @@ describe("analyzeInput", () => {
   });
 
   it("falls back to the heuristic on network failure and rate limits", async () => {
-    for (const planned of [
-      new Error("network detail with secret"),
-      jsonResponse({ error: "rate limit provider detail" }, 429),
+    for (const { planned, expectedCalls } of [
+      { planned: new Error("network detail with secret"), expectedCalls: 1 },
+      {
+        planned: jsonResponse({ error: "rate limit provider detail" }, 429),
+        expectedCalls: 2,
+      },
     ]) {
       const stub = createFetchStub([planned]);
       const intent = await analyzeInput("pendulum swings", undefined, {
@@ -200,7 +203,7 @@ describe("analyzeInput", () => {
         fetchImpl: stub.fetchImpl,
       });
       expect(intent.family).toBe("pendulum");
-      expect(stub.calls).toHaveLength(1);
+      expect(stub.calls).toHaveLength(expectedCalls);
     }
   });
 

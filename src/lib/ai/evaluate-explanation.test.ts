@@ -187,17 +187,25 @@ describe("evaluateExplanation", () => {
     expect(stub.calls).toHaveLength(2);
   });
 
-  it("falls back immediately on HTTP, network, rate-limit, and timeout failures", async () => {
+  it("falls back after bounded provider handling for transport failures", async () => {
     const cases: Array<{
       planned: Parameters<typeof createFetchStub>[0][number];
       env?: NodeJS.ProcessEnv;
+      expectedCalls: number;
     }> = [
-      { planned: jsonResponse({ error: "provider secret" }, 502) },
-      { planned: new Error("network secret") },
-      { planned: jsonResponse({ error: "quota secret" }, 429) },
+      {
+        planned: jsonResponse({ error: "provider secret" }, 502),
+        expectedCalls: 2,
+      },
+      { planned: new Error("network secret"), expectedCalls: 1 },
+      {
+        planned: jsonResponse({ error: "quota secret" }, 429),
+        expectedCalls: 2,
+      },
       {
         planned: "hang",
         env: { ...liveEnv, FEATHERLESS_TIMEOUT_MS: "20" },
+        expectedCalls: 1,
       },
     ];
     for (const testCase of cases) {
@@ -210,7 +218,7 @@ describe("evaluateExplanation", () => {
       expect(JSON.stringify(result)).not.toMatch(
         /provider secret|network secret|quota secret/,
       );
-      expect(stub.calls).toHaveLength(1);
+      expect(stub.calls).toHaveLength(testCase.expectedCalls);
     }
   });
 

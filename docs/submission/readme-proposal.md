@@ -10,7 +10,7 @@ The adopted version was updated after the proposal to reflect:
 - Netlify AI Gateway and Featherless configuration;
 - the explicit validated-demo offer that never relabels a custom question;
 - the separately selected offline explanation rubric;
-- 201 unit/API tests and four isolated Playwright flows;
+- 212 unit/API tests and four isolated Playwright flows;
 - corrected continuous evidence-chart ticks and unit-formatted tooltips; and
 - screenshots recaptured from the final production build at 1440×900.
 

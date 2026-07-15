@@ -25,9 +25,10 @@ The original checkout and completed contributor worktrees were not modified.
    `Offline rubric check`.
 3. **Deterministic physics remains authoritative:** model answer keys are
    overwritten by `src/lib/physics/deterministic-outcomes.ts`.
-4. **No wholesale `claude/integration-backend` merge:** its cache/retry work is
-   optional future scope and its older physics/validation semantics are
-   superseded.
+4. **Claude backend integrated selectively:** its compatible transient retry
+   and generated-response cache were rebased onto the hardened client and API.
+   Its older duplicate compiler, physics, fixtures, and contract edits remain
+   superseded rather than overwriting the validated release behavior.
 5. **README proposal adopted carefully:** stale contributor, legacy-contract,
    fallback, model, and test-count claims were replaced with release behavior.
 6. **Evidence chart issue closed:** continuous time scale removes duplicate
@@ -39,7 +40,7 @@ The original checkout and completed contributor worktrees were not modified.
 
 - `npm run lint` — passed.
 - `npm run typecheck` — passed.
-- `npm test -- --reporter=dot` — 19 files, 201 tests passed.
+- `npm test -- --reporter=dot` — 20 files, 212 tests passed.
 - `npm run build` — passed; `/`, `/api/compile`, `/api/evaluate`, and
   `/api/health` built successfully.
 - `PLAYWRIGHT_PORT=3020 npm run test:e2e` — four flows passed:

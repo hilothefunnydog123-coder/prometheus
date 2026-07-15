@@ -99,6 +99,10 @@ flowchart TD
 - Provider timeout and caller cancellation through `AbortController`.
 - Safe typed handling for missing credentials, network failures, rate limits,
   malformed JSON, empty responses, and invalid schemas.
+- Exactly one retry for transient 429/500/502/503/504 responses; timeouts and
+  cancellations fail fast to the explicit fallback path.
+- A 50-entry, 10-minute per-instance cache serves only successful generated
+  experiments; validated examples and rejected requests are never cached.
 - One repair attempt—never an unbounded model loop.
 - Prompt-injection containment through normalization, untrusted-data delimiters,
   forced tools, allowlists, and full post-model validation.
@@ -154,7 +158,7 @@ was generated for the learner's question.
 ```bash
 npm run lint
 npm run typecheck
-npm test                 # 201 unit/API tests; provider calls mocked
+npm test                 # 212 unit/API tests; provider calls mocked
 npm run build
 PLAYWRIGHT_PORT=3020 npm run test:e2e  # 4 full browser flows
 ```
@@ -169,6 +173,8 @@ the E2E suite from silently testing a stale server.
 - Live generation and AI feedback require a configured provider.
 - The offline path uses a separate authored demo and a coarse keyword rubric,
   both explicitly labeled.
+- Generated-response caching is per server instance, not a shared distributed
+  cache.
 - Browser console diagnostics currently include two non-blocking deprecation
   warnings from Three.js/WebAssembly dependencies.
 

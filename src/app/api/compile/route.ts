@@ -6,6 +6,7 @@ import {
   type ImageInput,
   type SupportedImageMimeType,
 } from "@/lib/ai/analyze-input";
+import { CompileCache, compileCache } from "@/lib/ai/compile-cache";
 import { compileExperiment } from "@/lib/ai/compile-experiment";
 import {
   MissingCredentialsError,
@@ -256,6 +257,12 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   try {
+    const cacheKey = CompileCache.key(prompt, gradeBand, image?.base64Data);
+    const cached = compileCache.get(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached, { status: 200 });
+    }
+
     const intent = await analyzeInput(prompt, image, {
       signal: request.signal,
     });
@@ -271,6 +278,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       { gradeBand, sourceQuestion: prompt },
       { signal: request.signal },
     );
+    if (response.provenance.source === "generated") {
+      compileCache.set(cacheKey, response);
+    }
     return NextResponse.json(response, { status: 200 });
   } catch (error) {
     return aiErrorResponse(error);

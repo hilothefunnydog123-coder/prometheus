@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/compile/route";
+import { compileCache } from "@/lib/ai/compile-cache";
 import type { CompileResponse } from "@/lib/contracts/experiment";
 import {
   dropDemo,
@@ -80,6 +81,7 @@ const terminalVelocitySpec = (() => {
 })();
 
 beforeEach(() => {
+  compileCache.clear();
   vi.stubEnv("FEATHERLESS_API_KEY", "");
   vi.stubEnv("OPENAI_API_KEY", "");
   vi.stubEnv("OPENAI_BASE_URL", "");
@@ -139,6 +141,48 @@ describe("POST /api/compile", () => {
     expect(JSON.stringify(stub.calls[1]!.body)).toContain(
       "teach me about pendulum periods",
     );
+  });
+
+  it("caches only generated responses for identical compile requests", async () => {
+    vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
+    const stub = createFetchStub([
+      toolCallResponse("report_learning_intent", {
+        topic: "pendulum periods",
+        family: "pendulum",
+        concepts: ["pendulum-period"],
+        difficulty: "standard",
+        confidence: 0.9,
+      }),
+      toolCallResponse("emit_experiment_spec", pendulumFixture),
+    ]);
+    vi.stubGlobal("fetch", stub.fetchImpl);
+    const fields = {
+      prompt: "teach me about pendulum periods",
+      gradeBand: "8-10",
+    };
+
+    const first = await POST(multipartRequest(fields));
+    const second = await POST(multipartRequest(fields));
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual(await first.json());
+    expect(stub.calls).toHaveLength(2);
+  });
+
+  it("does not cache validated-example fallbacks", async () => {
+    const fields = {
+      prompt: "does a cached heavier pendulum bob swing faster?",
+      gradeBand: "8-10",
+    };
+    const first = await POST(multipartRequest(fields));
+    const second = await POST(multipartRequest(fields));
+    expect((await first.json() as CompileResponse).provenance.source).toBe(
+      "validated-example",
+    );
+    expect((await second.json() as CompileResponse).provenance.source).toBe(
+      "validated-example",
+    );
+    expect(compileCache.size).toBe(0);
   });
 
   it("repairs a generic fixture until it matches a terminal-velocity question", async () => {

@@ -59,7 +59,7 @@ offer. The UI leaves the custom question untouched and requires the learner to
 explicitly open that demo under its own canonical question. A deterministic physics module,
 shared by the renderer and the grader, computes every "correct" answer.
 Mastery is Bayesian Knowledge Tracing implemented as pure functions and
-persisted in the browser. 201 unit and API tests run with all provider calls
+persisted in the browser. 212 unit and API tests run with all provider calls
 mocked, plus four isolated Playwright end-to-end flows.
 
 ## How AI/ML is used
@@ -110,7 +110,7 @@ server silently overwrites it.
   produces a disclosed, separately selected validated-demo offer. The app
   never relabels a custom question, and offline grading is separately selected
   and labeled.
-- 201 passing tests with zero live provider calls, covering malformed model
+- 212 passing tests with zero live provider calls, covering malformed model
   output, repair, timeout, prompt injection, and API boundary abuse.
 
 ## What we learned
@@ -144,7 +144,7 @@ vision models) · Vitest · Playwright
 | --- | --- |
 | Educational Impact — 25 points | Prediction-first misconception confrontation, synchronized evidence, explanation, transfer test, and BKT mastery address the difference between reading an answer and revising a mental model. |
 | Creative Use of AI/ML — 25 points | AI is core: text or diagram → question-aligned declarative experiment, then rubric feedback. Deterministic physics constrains rather than replaces the model's creative role. |
-| Technical Execution — 25 points | Strict API and schema validation, one repair, deterministic outcomes, explicit outage recovery, 201 mocked-provider tests, four Playwright flows, and a production build. |
+| Technical Execution — 25 points | Strict API and schema validation, one repair, deterministic outcomes, explicit outage recovery, 212 mocked-provider tests, four Playwright flows, and a production build. |
 | Pitch & Demo — 25 points | A rehearsed 1:52 story reaches simulation before 30 seconds, shows a wrong prediction, evidence, explanation, one-variable counterfactual, and mastery change. |
 
 Full claim-by-claim evidence with file paths: `judge-evidence-map.md`.

@@ -12,7 +12,7 @@ two minutes and the submission deadline is July 30 at 11:59 PM, no extensions.
 | --- | --- |
 | Educational Impact | Prediction-error learning loop, causal explanation, counterfactual transfer, and BKT mastery |
 | Creative Use of AI/ML | Natural-language or image input compiled into question-aligned interactive worlds; AI feedback bounded by deterministic scoring |
-| Technical Execution | Deterministic physics authority, strict request/model validation, explicit outage recovery, 201 unit/API tests, four browser flows |
+| Technical Execution | Deterministic physics authority, strict request/model validation, explicit outage recovery, 212 unit/API tests, four browser flows |
 | Pitch & Demo | 1:52 script with simulation before 0:30, visible misconception change, real screenshots, and rehearsed backup path |
 
 ## AI/ML and learning
@@ -43,8 +43,9 @@ two minutes and the submission deadline is July 30 at 11:59 PM, no extensions.
 | Physics claims are tested against analytic references | Drop, projectile, pendulum, limits, and determinism suites | `src/lib/physics/evidence.test.ts` |
 | Prompt injection is contained by construction | Normalization, untrusted delimiters, forced tools, allowlists, revalidation | `src/lib/ai/prompts.ts`, `src/lib/ai/text-rules.ts` |
 | API boundaries are strict | MIME, byte, dimension, schema, and grade-band validation | `src/app/api/**`, `tests/api/**` |
-| Provider failures are safe | Timeout/cancellation and typed safe errors; no provider bodies retained | `src/lib/ai/featherless-client.ts`, `src/lib/ai/errors.ts` |
-| Automated verification is offline | 201 unit/API tests and four Playwright flows | test suites and `playwright.config.ts` |
+| Provider failures are safe | Timeout/cancellation, one transient HTTP retry, typed safe errors, and no provider bodies retained | `src/lib/ai/featherless-client.ts`, `src/lib/ai/errors.ts` |
+| Repeated generation is bounded | Only successful generated responses enter the 50-entry, 10-minute TTL/LRU cache | `src/lib/ai/compile-cache.ts`, `src/app/api/compile/route.ts` |
+| Automated verification is offline | 212 unit/API tests and four Playwright flows | test suites and `playwright.config.ts` |
 
 ## Claims not to make
 
@@ -54,5 +55,4 @@ two minutes and the submission deadline is July 30 at 11:59 PM, no extensions.
 - Do not claim the system is immune to prompt injection; say it is contained
   through layered validation.
 - Do not claim an authored fallback was generated for a custom question.
-- Do not claim compile caching or provider retry from `claude/integration-backend`.
 - Do not present the offline rubric as AI feedback.
