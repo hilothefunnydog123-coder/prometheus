@@ -1,43 +1,37 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import {
-  EXPERIMENT_FAMILIES,
-  slugSchema,
-} from "@/lib/ai/contracts/experiment-spec";
+import { misconceptionSchema } from "@/lib/contracts/experiment";
 import { escapeHtml } from "@/lib/ai/errors";
 import { evaluateExplanation } from "@/lib/ai/evaluate-explanation";
 
 /**
- * POST /api/evaluate — application/json
+ * POST /api/evaluate — application/json (matches the frontend exactly)
  *   {
- *     explanation: string (1..4000),
- *     context: { family, question, concepts }
+ *     experimentId: string,
+ *     observedOutcome?: string,
+ *     studentExplanation: string,
+ *     misconception: MisconceptionSpec
  *   }
  *
- * Response 200: EvaluationResult — structured rubric + advisory
- * masterySignal.
+ * Response 200: { score, criteria, feedback, hint } (EvaluationResponse).
+ * criteria has one boolean per rubric item, in rubric order; score is
+ * computed server-side as passed/total.
  *
  * INVARIANT: this route generates feedback only. It must never import or
- * call the mastery module; applying masterySignal to BKT state is the
- * client's decision (enforced by tests/api/evaluate.test.ts).
+ * call the mastery module; applying results to BKT state is the frontend's
+ * decision (enforced by tests/api/evaluate.test.ts).
  */
 
 export const runtime = "nodejs";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
-const evaluateRequestSchema = z
-  .object({
-    explanation: z.string().min(1).max(4000),
-    context: z
-      .object({
-        family: z.enum(EXPERIMENT_FAMILIES),
-        question: z.string().trim().min(8).max(300),
-        concepts: z.array(slugSchema).max(5),
-      })
-      .strict(),
-  })
-  .strict();
+const evaluateRequestSchema = z.object({
+  experimentId: z.string().trim().min(1).max(80),
+  observedOutcome: z.string().trim().min(1).max(60).optional(),
+  studentExplanation: z.string().min(1).max(4000),
+  misconception: misconceptionSchema,
+});
 
 function errorResponse(
   status: number,
@@ -56,7 +50,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return errorResponse(
       415,
       "unsupported_media_type",
-      "Send application/json with 'explanation' and 'context' fields.",
+      "Send application/json with experimentId, studentExplanation, and misconception fields.",
     );
   }
 
@@ -82,15 +76,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     return errorResponse(
       400,
       "invalid_request",
-      "Expected { explanation, context: { family, question, concepts } } within documented limits.",
+      "Expected { experimentId, observedOutcome?, studentExplanation, misconception } within documented limits.",
     );
   }
 
   try {
-    const result = await evaluateExplanation(
-      parsed.data.explanation,
-      parsed.data.context,
-    );
+    const result = await evaluateExplanation(parsed.data);
     return NextResponse.json(result, { status: 200 });
   } catch {
     return errorResponse(
