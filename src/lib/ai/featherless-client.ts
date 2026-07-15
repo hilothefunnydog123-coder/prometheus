@@ -60,6 +60,20 @@ interface ProviderResponse {
   }>;
 }
 
+/**
+ * Transient provider failures worth one retry. Timeouts are deliberately
+ * NOT retried: the caller already waited a full timeout budget, and the
+ * fixture fallback is a better experience than doubling the wait.
+ */
+const TRANSIENT_HTTP_STATUSES: ReadonlySet<number> = new Set([
+  429, 500, 502, 503, 504,
+]);
+export const TRANSIENT_RETRY_DELAY_MS = 250;
+const MAX_ATTEMPTS = 2;
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export async function chatCompletion(
   config: FeatherlessConfig,
   request: ChatRequest,
@@ -67,6 +81,26 @@ export async function chatCompletion(
 ): Promise<ChatResult> {
   assertServerOnly();
 
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await chatCompletionOnce(config, request, fetchImpl);
+    } catch (error) {
+      const transient =
+        error instanceof ProviderHttpError &&
+        TRANSIENT_HTTP_STATUSES.has(error.status);
+      if (!transient || attempt >= MAX_ATTEMPTS) {
+        throw error;
+      }
+      await sleep(TRANSIENT_RETRY_DELAY_MS);
+    }
+  }
+}
+
+async function chatCompletionOnce(
+  config: FeatherlessConfig,
+  request: ChatRequest,
+  fetchImpl: typeof fetch,
+): Promise<ChatResult> {
   const timeoutMs = request.timeoutMs ?? config.timeoutMs;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);

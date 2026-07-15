@@ -106,6 +106,40 @@ describe("chatCompletion", () => {
     ).rejects.toBeInstanceOf(ProviderTimeoutError);
   });
 
+  it("retries exactly once on transient provider errors, then succeeds", async () => {
+    const stub = createFetchStub([
+      jsonResponse({ error: "busy" }, 503),
+      textResponse("recovered"),
+    ]);
+    const result = await chatCompletion(config, request, stub.fetchImpl);
+    expect(result.content).toBe("recovered");
+    expect(stub.calls).toHaveLength(2);
+  });
+
+  it("gives up after the single retry on persistent transient errors", async () => {
+    const stub = createFetchStub([jsonResponse({ error: "busy" }, 503)]);
+    await expect(
+      chatCompletion(config, request, stub.fetchImpl),
+    ).rejects.toBeInstanceOf(ProviderHttpError);
+    expect(stub.calls).toHaveLength(2);
+  });
+
+  it("does not retry non-transient HTTP errors", async () => {
+    const stub = createFetchStub([jsonResponse({ error: "bad request" }, 400)]);
+    await expect(
+      chatCompletion(config, request, stub.fetchImpl),
+    ).rejects.toBeInstanceOf(ProviderHttpError);
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it("does not retry timeouts — the caller already waited a full budget", async () => {
+    const stub = createFetchStub(["hang"]);
+    await expect(
+      chatCompletion(config, { ...request, timeoutMs: 20 }, stub.fetchImpl),
+    ).rejects.toBeInstanceOf(ProviderTimeoutError);
+    expect(stub.calls).toHaveLength(1);
+  });
+
   it("refuses to run in a browser-like environment", async () => {
     (globalThis as { window?: unknown }).window = {};
     const stub = createFetchStub([textResponse("nope")]);

@@ -133,8 +133,8 @@ describe("compileExperiment", () => {
     expect(result.warnings.join(" ")).toContain("timed out");
   });
 
-  it("falls back to a fixture on provider HTTP errors without repairing", async () => {
-    const stub = createFetchStub([jsonResponse({ error: "boom" }, 500)]);
+  it("falls back to a fixture on non-transient provider errors without repairing", async () => {
+    const stub = createFetchStub([jsonResponse({ error: "boom" }, 400)]);
     const result = await compileExperiment(intent(), { gradeBand: "8-10" }, {
       env: liveEnv,
       fetchImpl: stub.fetchImpl,
@@ -142,6 +142,29 @@ describe("compileExperiment", () => {
     expect(result.provenance.source).toBe("validated-example");
     expect(result.warnings.join(" ")).toContain("unavailable");
     expect(stub.calls).toHaveLength(1);
+  });
+
+  it("survives a transient provider error via the client's single retry", async () => {
+    const stub = createFetchStub([
+      jsonResponse({ error: "busy" }, 503),
+      toolCallResponse("emit_experiment_spec", modelSpec),
+    ]);
+    const result = await compileExperiment(intent(), { gradeBand: "8-10" }, {
+      env: liveEnv,
+      fetchImpl: stub.fetchImpl,
+    });
+    expect(result.provenance.source).toBe("generated");
+    expect(stub.calls).toHaveLength(2);
+  });
+
+  it("falls back after persistent transient errors (two calls, no repair)", async () => {
+    const stub = createFetchStub([jsonResponse({ error: "busy" }, 503)]);
+    const result = await compileExperiment(intent(), { gradeBand: "8-10" }, {
+      env: liveEnv,
+      fetchImpl: stub.fetchImpl,
+    });
+    expect(result.provenance.source).toBe("validated-example");
+    expect(stub.calls).toHaveLength(2); // one retry inside the client, no repair round
   });
 
   it("resolves injection-shaped unknown intents to the default fixture", async () => {
