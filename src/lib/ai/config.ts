@@ -17,8 +17,8 @@ export const DEFAULT_BASE_URL = "https://api.featherless.ai/v1";
 export const DEFAULT_TIMEOUT_MS = 20_000;
 
 /** Documented defaults; override with FEATHERLESS_TEXT_MODEL / _VISION_MODEL. */
-export const DEFAULT_TEXT_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct";
-export const DEFAULT_VISION_MODEL = "Qwen/Qwen2.5-VL-7B-Instruct";
+export const DEFAULT_TEXT_MODEL = "Qwen/Qwen3-32B";
+export const DEFAULT_VISION_MODEL = "google/gemma-3-27b-it";
 
 /**
  * Throws if imported into a browser bundle. Every module that can touch the

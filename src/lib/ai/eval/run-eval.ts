@@ -23,8 +23,9 @@ interface CaseResult {
   expectedFamily: string;
   routedFamily: string;
   routedCorrectly: boolean;
+  /** "generated" | "validated-example" | "rejected-422" */
   compileSource: string;
-  fallbackReason?: string;
+  warning?: string;
   latencyMs: number;
 }
 
@@ -56,31 +57,40 @@ async function main(): Promise<void> {
   for (const evalCase of EVAL_DATASET) {
     const startedAt = Date.now();
     const intent = await analyzeInput(evalCase.text);
-    const compiled = await compileExperiment(intent);
+    const compiled =
+      intent.family === "unknown"
+        ? null // the API returns 422 for unsupported material
+        : await compileExperiment(intent, { gradeBand: "8-10" });
     const latencyMs = Date.now() - startedAt;
+    const source = compiled?.provenance.source ?? "rejected-422";
     results.push({
       id: evalCase.id,
       expectedFamily: evalCase.expectedFamily,
       routedFamily: intent.family,
       routedCorrectly: intent.family === evalCase.expectedFamily,
-      compileSource: compiled.meta.source,
-      fallbackReason: compiled.meta.fallbackReason,
+      compileSource: source,
+      warning: compiled?.warnings[0],
       latencyMs,
     });
     console.log(
-      `  ${evalCase.id.padEnd(28)} routed=${intent.family.padEnd(10)} source=${compiled.meta.source.padEnd(14)} ${latencyMs}ms`,
+      `  ${evalCase.id.padEnd(28)} routed=${intent.family.padEnd(10)} source=${source.padEnd(18)} ${latencyMs}ms`,
     );
   }
 
   const latencies = results.map((r) => r.latencyMs).sort((a, b) => a - b);
   const routingAccuracy =
     results.filter((r) => r.routedCorrectly).length / results.length;
+  const compiledResults = results.filter((r) => r.compileSource !== "rejected-422");
   const schemaPassRate =
-    results.filter((r) => r.compileSource !== "fixture").length /
-    results.length;
+    compiledResults.length === 0
+      ? 0
+      : compiledResults.filter((r) => r.compileSource === "generated").length /
+        compiledResults.length;
   const fallbackRate =
-    results.filter((r) => r.compileSource === "fixture").length /
-    results.length;
+    compiledResults.length === 0
+      ? 0
+      : compiledResults.filter((r) => r.compileSource === "validated-example")
+          .length / compiledResults.length;
 
   const summary = {
     mode: live ? "live" : "offline",
