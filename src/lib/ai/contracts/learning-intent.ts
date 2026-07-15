@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EXPERIMENT_FAMILIES, safeText, slugSchema } from "./experiment-spec";
+import { EXPERIMENT_FAMILIES, safeText, slugSchema } from "../text-rules";
 
 /**
  * PUBLIC CONTRACT — LearningIntent
