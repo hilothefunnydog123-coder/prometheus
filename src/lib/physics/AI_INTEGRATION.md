@@ -16,8 +16,8 @@ small integration-branch changes:
    This removes the duplicate semi-implicit Euler solver, the distance-scaled
    projectile hit tolerance, and the small-angle-only pendulum comparison.
 
-2. In `src/lib/ai/validation.ts`, function `checkCounterfactuals`, require a
-   present `counterfactual.prediction.testChange` to match
+2. In `src/lib/ai/validation.ts`, function `checkCounterfactuals`, require
+   `counterfactual.prediction.testChange`, when present, to match
    `counterfactual.change` for every family. Remove the current
    `spec.scene.family !== "pendulum"` exception. The renderer already rejects
    mismatched changes in `applyCounterfactual`; compiler validation should
