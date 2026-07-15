@@ -36,7 +36,7 @@ export const PENDULUM_PERIOD_RELATIVE_TOLERANCE = 0.01;
 export const PROJECTILE_AIR_DENSITY_KG_PER_CUBIC_METER = 1.225;
 
 const MAX_PROJECTILE_STEPS = 1_000_000;
-const MAX_PROJECTILE_TIME_SECONDS = 3_600;
+export const MAX_SIMULATION_TIME_SECONDS = 3_600;
 const MAX_INTEGRATION_STEP_SECONDS = 1 / 240;
 const FORBIDDEN_PATH_SEGMENTS = new Set([
   "__proto__",
@@ -384,7 +384,7 @@ function draggedProjectileImpact(
 
   while (
     steps < MAX_PROJECTILE_STEPS &&
-    state.time < MAX_PROJECTILE_TIME_SECONDS
+    state.time < MAX_SIMULATION_TIME_SECONDS
   ) {
     const step = projectileStepSize(state, scene.gravity, dragFactor);
     const next = advanceProjectile(state, step, scene.gravity, dragFactor);
