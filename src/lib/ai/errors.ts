@@ -20,13 +20,37 @@ export class ProviderTimeoutError extends Error {
   }
 }
 
+export class ProviderCancelledError extends Error {
+  readonly code = "provider_cancelled";
+  constructor() {
+    super("AI provider request was cancelled");
+    this.name = "ProviderCancelledError";
+  }
+}
+
+export class ProviderNetworkError extends Error {
+  readonly code = "provider_network_error";
+  constructor() {
+    super("AI provider could not be reached");
+    this.name = "ProviderNetworkError";
+  }
+}
+
 export class ProviderHttpError extends Error {
-  readonly code = "provider_http_error";
+  readonly code: string = "provider_http_error";
   constructor(readonly status: number) {
     // Deliberately excludes the response body — provider errors can echo
     // request content and must never reach logs or users verbatim.
     super(`AI provider returned HTTP ${status}`);
     this.name = "ProviderHttpError";
+  }
+}
+
+export class ProviderRateLimitError extends ProviderHttpError {
+  override readonly code = "provider_rate_limit";
+  constructor() {
+    super(429);
+    this.name = "ProviderRateLimitError";
   }
 }
 
@@ -58,6 +82,15 @@ export function toSafeMessage(error: unknown): string {
   }
   if (error instanceof ProviderTimeoutError) {
     return "The AI service took too long to respond.";
+  }
+  if (error instanceof ProviderCancelledError) {
+    return "The AI request was cancelled.";
+  }
+  if (error instanceof ProviderRateLimitError) {
+    return "The AI service is busy right now.";
+  }
+  if (error instanceof ProviderNetworkError) {
+    return "The AI service could not be reached.";
   }
   if (error instanceof ProviderHttpError) {
     return "The AI service is currently unavailable.";
