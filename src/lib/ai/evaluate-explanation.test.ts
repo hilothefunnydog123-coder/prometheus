@@ -137,4 +137,15 @@ describe("heuristicEvaluation", () => {
     expect(result.feedback.length).toBeGreaterThanOrEqual(10);
     expect(result.misconceptions).toEqual([]);
   });
+
+  it("recognizes a strong causal explanation even when it paraphrases the concept slug", () => {
+    const result = heuristicEvaluation(
+      "Both objects accelerated at the same rate because the heavier object's greater gravitational force is balanced by its greater inertia, so they reached the ground together.",
+      { ...context, concepts: ["mass-fall-speed"] },
+    );
+
+    expect(result.scores.correctness).toBe(3);
+    expect(result.scores.mechanism).toBe(3);
+    expect(result.scores.vocabulary).toBe(3);
+  });
 });

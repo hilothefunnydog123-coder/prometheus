@@ -10,7 +10,7 @@ import {
   type RapierRigidBody,
   useSphericalJoint,
 } from "@react-three/rapier";
-import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
+import { Atom } from "lucide-react";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import type {
@@ -26,6 +26,7 @@ type ExperimentCanvasProps = {
   runToken: number;
   launched: boolean;
   capturing: boolean;
+  paused: boolean;
   onComplete: (evidence: SimulationEvidence) => void;
 };
 
@@ -71,6 +72,7 @@ function DropScene({ scene, launched }: { scene: DropSceneSpec; launched: boolea
       <MeasurementPylon x={0} height={scene.height} label={`${scene.height.toFixed(0)} m`} />
       {scene.objects.map((object, index) => {
         const x = index === 0 ? -1.45 : 1.45;
+        const visualRadius = Math.max(0.68, object.radius * 1.55);
         return (
           <group key={object.id}>
             <RigidBody
@@ -89,18 +91,19 @@ function DropScene({ scene, launched }: { scene: DropSceneSpec; launched: boolea
             >
               <BallCollider args={[object.radius]} />
               <mesh castShadow receiveShadow>
-                <sphereGeometry args={[object.radius, 48, 32]} />
+                <sphereGeometry args={[visualRadius, 64, 48]} />
                 <meshPhysicalMaterial
                   color={object.color}
                   emissive={object.color}
-                  emissiveIntensity={0.22}
+                  emissiveIntensity={0.52}
                   metalness={0.5}
                   roughness={0.24}
                   clearcoat={0.75}
                 />
               </mesh>
+              <pointLight color={object.color} intensity={2.8} distance={4.5} />
             </RigidBody>
-            <Html position={[x, scene.height + object.radius + 0.68, 0]} center distanceFactor={10}>
+            <Html position={[x, scene.height + visualRadius + 0.62, 0]} center distanceFactor={10}>
               <div className="object-tag">
                 <strong>{object.mass.toFixed(object.mass % 1 ? 1 : 0)} kg</strong>
                 <span>{index === 0 ? "Object A" : "Object B"}</span>
@@ -321,6 +324,7 @@ function World({
   spec,
   launched,
   capturing,
+  paused,
   onComplete,
   onReady,
 }: Omit<ExperimentCanvasProps, "runToken"> & { onReady: () => void }) {
@@ -333,11 +337,11 @@ function World({
       <spotLight position={[-8, 10, 3]} intensity={90} angle={0.34} penumbra={0.8} color="#ff7138" />
       <spotLight position={[8, 9, -4]} intensity={70} angle={0.38} penumbra={0.85} color="#42d9ff" />
       <Suspense fallback={null}>
-        <Physics gravity={[0, -spec.scene.gravity, 0]} timeStep={1 / 60} interpolate colliders={false}>
+        <Physics gravity={[0, -spec.scene.gravity, 0]} timeStep={1 / 60} interpolate colliders={false} paused={paused}>
           {spec.scene.family === "drop" && <DropScene scene={spec.scene} launched={launched} />}
           {spec.scene.family === "projectile" && <ProjectileScene scene={spec.scene} launched={launched} />}
           {spec.scene.family === "pendulum" && <PendulumScene scene={spec.scene} launched={launched} />}
-          <SimulationTimer active={capturing} spec={spec} onComplete={onComplete} />
+          <SimulationTimer active={capturing && !paused} spec={spec} onComplete={onComplete} />
           <SceneReady onReady={onReady} />
         </Physics>
       </Suspense>
@@ -348,17 +352,19 @@ function World({
         maxDistance={28}
         minPolarAngle={Math.PI * 0.18}
         maxPolarAngle={Math.PI * 0.48}
-        target={spec.scene.family === "projectile" ? [3, 2.5, 0] : [0, 3, 0]}
+        target={
+          spec.scene.family === "projectile"
+            ? [3, 2.5, 0]
+            : spec.scene.family === "drop"
+              ? [0, 4.25, 0]
+              : [0, 3, 0]
+        }
       />
-      <EffectComposer multisampling={0}>
-        <Bloom intensity={0.75} luminanceThreshold={0.55} mipmapBlur />
-        <Vignette eskil={false} offset={0.12} darkness={0.76} />
-      </EffectComposer>
     </>
   );
 }
 
-export function ExperimentCanvas({ spec, runToken, launched, capturing, onComplete }: ExperimentCanvasProps) {
+export function ExperimentCanvas({ spec, runToken, launched, capturing, paused, onComplete }: ExperimentCanvasProps) {
   const [webglSupported, setWebglSupported] = useState<boolean | null>(null);
   const [sceneReady, setSceneReady] = useState(false);
 
@@ -377,7 +383,7 @@ export function ExperimentCanvas({ spec, runToken, launched, capturing, onComple
   if (webglSupported === null) {
     return (
       <div className="canvas-loading" role="status">
-        <div className="loader-orbit"><span /><span /><span /></div>
+        <Atom className="loading-atom" size={34} aria-hidden="true" />
         <p>Checking the 3D laboratory</p>
       </div>
     );
@@ -395,7 +401,9 @@ export function ExperimentCanvas({ spec, runToken, launched, capturing, onComple
   const camera =
     spec.scene.family === "projectile"
       ? ({ position: [5, 8, 18], fov: 46 } as const)
-      : ({ position: [8, 7, 13], fov: 44 } as const);
+      : spec.scene.family === "drop"
+        ? ({ position: [6.3, 6.4, 11.4], fov: 37 } as const)
+        : ({ position: [8, 7, 13], fov: 44 } as const);
   return (
     <>
       <Canvas
@@ -411,13 +419,14 @@ export function ExperimentCanvas({ spec, runToken, launched, capturing, onComple
           spec={spec}
           launched={launched}
           capturing={capturing}
+          paused={paused}
           onComplete={onComplete}
           onReady={() => setSceneReady(true)}
         />
       </Canvas>
       {!sceneReady && (
         <div className="canvas-loading" role="status">
-          <div className="loader-orbit"><span /><span /><span /></div>
+          <Atom className="loading-atom" size={34} aria-hidden="true" />
           <p>Calibrating the physics world</p>
         </div>
       )}

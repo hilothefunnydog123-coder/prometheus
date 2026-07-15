@@ -52,24 +52,72 @@ export function heuristicEvaluation(
   const text = sanitizeUserText(explanation).toLowerCase();
   const words = text.split(/[^a-z0-9]+/).filter((w) => w.length > 2);
 
-  const conceptWords = context.concepts.flatMap((c) => c.split(/[-_]/));
-  const coveredConcepts = conceptWords.filter((w) => text.includes(w)).length;
-  const coverageScore =
-    conceptWords.length === 0
-      ? 1
-      : Math.min(3, Math.round((coveredConcepts / conceptWords.length) * 3));
+  const familyVocabulary: Record<ExperimentFamily, RegExp[]> = {
+    drop: [
+      /\bgravit/, /\baccelerat/, /\binertia\b/, /\bforce\b/, /\bmass\b/,
+      /same rate/, /arriv(?:e|ed|ing) together/, /hit together/, /air resistance/,
+      /\bdrag\b/,
+    ],
+    projectile: [
+      /\bgravit/, /\baccelerat/, /\bvelocity\b/, /horizontal/, /vertical/,
+      /component/, /trajectory/, /launch angle/, /time of flight/, /\brange\b/,
+    ],
+    pendulum: [
+      /\bgravit/, /\bperiod\b/, /\blength\b/, /pendulum/, /oscillat/,
+      /restoring force/, /release angle/, /\bcycle\b/, /\bfrequency\b/,
+    ],
+  };
+  const conceptWords = context.concepts
+    .flatMap((concept) => concept.split(/[-_]/))
+    .filter((word) => word.length > 3);
+  const conceptMatches = conceptWords.filter((word) => text.includes(word)).length;
+  const vocabularyMatches = familyVocabulary[context.family].filter((pattern) =>
+    pattern.test(text),
+  ).length;
+  const evidenceLanguage = /\b(observed|showed|measured|graph|tim(?:e|ing)|result|together|same)\b/.test(text);
+  const causalLanguage = /\b(because|therefore|since|so|caus|due to|means that|which makes)\b/.test(text);
+  const mechanismEvidence = vocabularyMatches + Math.min(conceptMatches, 2);
 
-  const substanceScore = words.length >= 40 ? 2 : words.length >= 15 ? 1 : 0;
+  const correctnessScore =
+    mechanismEvidence >= 5 && evidenceLanguage
+      ? 3
+      : mechanismEvidence >= 3
+        ? 2
+        : mechanismEvidence >= 1
+          ? 1
+          : 0;
+  const mechanismScore =
+    causalLanguage && mechanismEvidence >= 4 && words.length >= 12
+      ? 3
+      : causalLanguage && mechanismEvidence >= 2
+        ? 2
+        : mechanismEvidence >= 2 && words.length >= 12
+          ? 1
+          : 0;
+  const vocabularyScore =
+    mechanismEvidence >= 5
+      ? 3
+      : mechanismEvidence >= 3
+        ? 2
+        : mechanismEvidence >= 1
+          ? 1
+          : 0;
+  const overall = correctnessScore + mechanismScore + vocabularyScore;
+  const feedback =
+    overall >= 7
+      ? "Strong causal chain: you connected the observed result to the underlying mechanism and used the experiment's key physics vocabulary. Now test whether that reasoning survives one controlled change."
+      : overall >= 4
+        ? "You identified part of the mechanism. Strengthen the explanation by naming what the evidence showed and linking it with because or therefore to the physics that caused it."
+        : "This describes the result more than its cause. Name a measured observation, then explain which physics principle produced it; this local rubric is intentionally conservative while automated grading is offline.";
 
   return explanationEvaluationSchema.parse({
     scores: {
-      correctness: Math.min(coverageScore, 2),
-      mechanism: Math.min(substanceScore, 2),
-      vocabulary: coverageScore,
+      correctness: correctnessScore,
+      mechanism: mechanismScore,
+      vocabulary: vocabularyScore,
     },
     misconceptions: [],
-    feedback:
-      "Automated grading is offline, so this is a rough keyword-based score. Compare your explanation with what the simulation showed and check that you named the cause, not just the result.",
+    feedback,
   });
 }
 

@@ -57,7 +57,7 @@ async function finishLearningLoop(page: Page, flow: FamilyFlow) {
     page.getByRole("heading", { name: flow.labTitle }),
   ).toBeVisible({ timeout: 10_000 });
 
-  const run = page.getByRole("button", { name: "Run experiment" });
+  const run = page.getByRole("button", { name: "Lock prediction & run" });
   await expect(run).toBeDisabled();
   await page.getByRole("button", { name: flow.initialChoice }).click();
   await expect(run).toBeEnabled();
@@ -68,13 +68,13 @@ async function finishLearningLoop(page: Page, flow: FamilyFlow) {
   ).toBeVisible({ timeout: 15_000 });
   await page
     .getByRole("textbox", {
-      name: "Now explain the result in your own words.",
+      name: "What caused the result?",
     })
     .fill(flow.explanation);
-  await page.getByRole("button", { name: "Test my explanation" }).click();
+  await page.getByRole("button", { name: "Check my explanation" }).click();
 
   const challenge = page.getByRole("button", {
-    name: "Challenge this model",
+    name: "Change one variable",
   });
   await expect(challenge).toBeVisible({ timeout: 10_000 });
   await challenge.click();
@@ -82,7 +82,9 @@ async function finishLearningLoop(page: Page, flow: FamilyFlow) {
   await expect(
     page.getByRole("heading", { name: flow.counterfactualQuestion }),
   ).toBeVisible();
-  const transferRun = page.getByRole("button", { name: "Run experiment" });
+  const transferRun = page.getByRole("button", {
+    name: "Lock prediction & run",
+  });
   await page
     .getByRole("button", { name: flow.counterfactualChoice })
     .click();

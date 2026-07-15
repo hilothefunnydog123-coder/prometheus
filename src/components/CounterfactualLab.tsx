@@ -5,18 +5,29 @@ import {
   ArrowLeft,
   ArrowRight,
   Atom,
-  BrainCircuit,
+  BadgeCheck,
   Check,
+  ChevronDown,
   ChevronRight,
   CircleGauge,
+  Expand,
   FlaskConical,
   ImagePlus,
+  Lightbulb,
+  LockKeyhole,
+  Minus,
+  Orbit,
   Pause,
+  Pencil,
   Play,
+  Plus,
   RotateCcw,
+  ShieldCheck,
   Sparkles,
   Target,
+  Timer,
   Upload,
+  Wind,
   X,
   Zap,
 } from "lucide-react";
@@ -52,7 +63,7 @@ const ExperimentCanvas = dynamic(
     ssr: false,
     loading: () => (
       <div className="canvas-loading">
-        <div className="loader-orbit"><span /><span /><span /></div>
+        <Atom className="loading-atom" size={34} aria-hidden="true" />
         <p>Calibrating 3D world</p>
       </div>
     ),
@@ -85,10 +96,16 @@ const exampleMeta = [
 ];
 
 function phaseIndex(phase: Phase) {
-  if (phase === "predicting" || phase === "running") return 0;
-  if (phase === "evidence" || phase === "explaining") return 1;
-  if (phase === "counterfactual-predicting" || phase === "counterfactual-running") return 2;
-  if (phase === "complete") return 3;
+  if (phase === "input" || phase === "compiling") return 0;
+  if (phase === "predicting") return 1;
+  if (phase === "running") return 2;
+  if (phase === "evidence") return 3;
+  if (
+    phase === "explaining" ||
+    phase === "counterfactual-predicting" ||
+    phase === "counterfactual-running"
+  ) return 4;
+  if (phase === "complete") return 5;
   return 0;
 }
 
@@ -113,15 +130,13 @@ async function prepareImage(file: File) {
 
 function BrandMark() {
   return (
-    <div className="brand-mark" aria-hidden="true">
-      <span className="brand-core" />
-      <span className="brand-ring brand-ring-one" />
-      <span className="brand-ring brand-ring-two" />
-    </div>
+    <span className="brand-mark" aria-hidden="true">
+      <Orbit size={25} strokeWidth={1.65} />
+    </span>
   );
 }
 
-function Header({ inLab, onExit }: { inLab: boolean; onExit: () => void }) {
+function Header({ inLab, phase, onExit }: { inLab: boolean; phase: Phase; onExit: () => void }) {
   return (
     <header className={`site-header ${inLab ? "lab-header" : ""}`}>
       <button className="brand-lockup" onClick={onExit} aria-label="Counterfactual Lab home">
@@ -131,6 +146,11 @@ function Header({ inLab, onExit }: { inLab: boolean; onExit: () => void }) {
           <small>LAB</small>
         </span>
       </button>
+      {inLab && (
+        <nav className="header-progress" aria-label="Experiment progress">
+          <ProgressRail phase={phase} />
+        </nav>
+      )}
       {!inLab ? (
         <div className="header-note">
           <span className="live-dot" />
@@ -151,10 +171,7 @@ function CompilerOverlay({ stage }: { stage: number }) {
     <div className="compiler-overlay" role="status" aria-live="polite">
       <div className="compiler-card">
         <div className="compiler-visual">
-          <span className="compiler-sphere" />
-          <span className="compiler-path compiler-path-a" />
-          <span className="compiler-path compiler-path-b" />
-          <Sparkles size={22} />
+          <Atom size={54} strokeWidth={1.15} aria-hidden="true" />
         </div>
         <p className="eyebrow">EXPERIMENT COMPILER</p>
         <h2>{currentStage?.label}</h2>
@@ -301,7 +318,7 @@ function Landing({
 
 function ProgressRail({ phase }: { phase: Phase }) {
   const active = phaseIndex(phase);
-  const steps = ["Predict", "Observe", "Challenge", "Master"];
+  const steps = ["Ask", "Predict", "Test", "Evidence", "Change", "Explain"];
   return (
     <div className="progress-rail">
       {steps.map((step, index) => (
@@ -329,6 +346,7 @@ function PredictionPanel({
   counterfactual: boolean;
   running: boolean;
 }) {
+  const [confidence, setConfidence] = useState(62);
   const testChange = spec.prediction.testChange;
   const changedVariable = testChange?.targetPath
     .split(".")
@@ -337,9 +355,9 @@ function PredictionPanel({
 
   return (
     <div className="panel-content prediction-panel">
-      <p className="panel-kicker">{counterfactual ? "COUNTERFACTUAL 01" : "COMMIT BEFORE YOU SEE"}</p>
+      <p className="panel-kicker">{counterfactual ? "CHANGE ONE VARIABLE" : "COMMIT BEFORE YOU SEE"}</p>
       <h2>{spec.prediction.prompt}</h2>
-      <p className="panel-support">Your prediction is locked before the experiment runs. That friction is where learning begins.</p>
+      <p className="panel-support">Choose an outcome before the world moves. You can revise your model after you see the evidence.</p>
       {testChange && changedVariable && (
         <div className="test-change" aria-label={`Only ${changedVariable} changes to ${testChange.value}`}>
           <small>ONE VARIABLE CHANGES</small>
@@ -362,8 +380,27 @@ function PredictionPanel({
           </button>
         ))}
       </div>
+      <div className="confidence-control">
+        <div>
+          <label htmlFor="prediction-confidence">How confident are you?</label>
+          <output htmlFor="prediction-confidence">{confidence}%</output>
+        </div>
+        <input
+          id="prediction-confidence"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value={confidence}
+          disabled={running}
+          onChange={(event) => setConfidence(Number(event.target.value))}
+        />
+        <div className="confidence-labels" aria-hidden="true">
+          <span>Not sure</span><span>Neutral</span><span>Very sure</span>
+        </div>
+      </div>
       <button className="run-button" disabled={!selected || running} onClick={onRun}>
-        <Play size={17} fill="currentColor" /> {running ? "Experiment running" : "Run experiment"}
+        <LockKeyhole size={16} /> {running ? "Experiment running" : "Lock prediction & run"}
       </button>
     </div>
   );
@@ -372,54 +409,85 @@ function PredictionPanel({
 function EvidencePanel({
   spec,
   evidence,
+  predictionLabel,
   explanation,
   setExplanation,
   onEvaluate,
 }: {
   spec: ExperimentSpec;
   evidence: SimulationEvidence;
+  predictionLabel: string;
   explanation: string;
   setExplanation: (value: string) => void;
   onEvaluate: () => void;
 }) {
   return (
     <div className="panel-content evidence-panel">
-      <div className="evidence-status"><span><Check size={13} /></span> EXPERIMENT COMPLETE</div>
+      <section className="notebook-recap">
+        <div><span>YOUR PREDICTION</span><Pencil size={13} aria-hidden="true" /></div>
+        <p>I predicted <strong>{predictionLabel.toLowerCase()}</strong>.</p>
+      </section>
+      <div className="evidence-status"><span><Check size={13} /></span> RUN 1 · EXPERIMENT COMPLETE</div>
       <h2>What the world showed</h2>
+      <p className="observed-copy">{evidence.summary}</p>
       <div className="metric-grid">
         <div><small>{evidence.metricA.label}</small><strong>{evidence.metricA.value}</strong></div>
         <div><small>{evidence.metricB.label}</small><strong>{evidence.metricB.value}</strong></div>
       </div>
+      <div className="chart-heading"><span>Height vs. time</span><small>Recorded evidence</small></div>
       <EvidenceChart spec={spec} evidence={evidence} />
-      <p className="evidence-summary">{evidence.summary}</p>
-      <label htmlFor="explanation">Now explain the result in your own words.</label>
+      <div className="insight-strip">
+        <Lightbulb size={19} aria-hidden="true" />
+        <div><strong>Evidence, not the answer</strong><p>{spec.misconception.description}</p></div>
+      </div>
+      <label htmlFor="explanation">What caused the result?</label>
       <textarea id="explanation" value={explanation} onChange={(event) => setExplanation(event.target.value)} placeholder={spec.prediction.reasoningPrompt} rows={3} />
       <button className="primary-panel-button" disabled={explanation.trim().length < 12} onClick={onEvaluate}>
-        Test my explanation <ArrowRight size={16} />
+        Check my explanation <ArrowRight size={16} />
       </button>
     </div>
   );
 }
 
-function FeedbackPanel({ spec, evaluation, onChallenge }: { spec: ExperimentSpec; evaluation: EvaluationResponse; onChallenge: () => void }) {
+function FeedbackPanel({
+  spec,
+  evidence,
+  predictionLabel,
+  evaluation,
+  onChallenge,
+}: {
+  spec: ExperimentSpec;
+  evidence: SimulationEvidence;
+  predictionLabel: string;
+  evaluation: EvaluationResponse;
+  onChallenge: () => void;
+}) {
+  const next = spec.counterfactuals[0];
   return (
     <div className="panel-content feedback-panel">
-      <p className="panel-kicker">YOUR MODEL, UPDATED</p>
-      <div className="score-ring" style={{ "--score": `${Math.round(evaluation.score * 100) * 3.6}deg` } as React.CSSProperties}>
-        <div><strong>{Math.round(evaluation.score * 100)}</strong><small>reasoning score</small></div>
+      <section className="notebook-recap">
+        <div><span>YOUR PREDICTION</span><Pencil size={13} aria-hidden="true" /></div>
+        <p>I predicted <strong>{predictionLabel.toLowerCase()}</strong>.</p>
+      </section>
+      <section className="notebook-observed">
+        <span>WHAT WE OBSERVED</span>
+        <p>{evidence.summary}</p>
+      </section>
+      <div className="chart-heading"><span>Height vs. time</span><small>Run 1 of 1</small></div>
+      <EvidenceChart spec={spec} evidence={evidence} />
+      <div className="insight-strip validated">
+        <BadgeCheck size={20} aria-hidden="true" />
+        <div>
+          <strong>Insight validated · {Math.round(evaluation.score * 100)}% reasoning match</strong>
+          <p>{evaluation.feedback}</p>
+        </div>
       </div>
-      <h2>{spec.misconception.title}</h2>
-      <p>{evaluation.feedback}</p>
-      <div className="rubric-list">
-        {spec.misconception.explanationRubric.map((item, index) => {
-          const passed = Object.values(evaluation.criteria)[index] ?? evaluation.score > index * 0.25;
-          return <div key={item} className={passed ? "passed" : ""}><span>{passed ? <Check size={12} /> : index + 1}</span>{item}</div>;
-        })}
+      <div className="counterfactual-heading"><span>CHANGE ONE VARIABLE</span><small>Test a counterfactual.</small></div>
+      <div className="counterfactual-action">
+        <Wind size={24} aria-hidden="true" />
+        <div><strong>{next?.title ?? "Try a new condition"}</strong><p>{next?.prompt ?? evaluation.hint}</p></div>
+        <button type="button" onClick={onChallenge}>Change one variable <ArrowRight size={15} /></button>
       </div>
-      <div className="hint-box"><BrainCircuit size={18} /><div><small>NEXT LENS</small><p>{evaluation.hint}</p></div></div>
-      <button className="primary-panel-button" onClick={onChallenge}>
-        Challenge this model <Zap size={16} />
-      </button>
     </div>
   );
 }
@@ -448,6 +516,7 @@ function CompletePanel({ spec, firstCorrect, transferCorrect, mastery, onRestart
 function LabWorkspace({
   spec,
   setSpec,
+  question,
   phase,
   setPhase,
   onExit,
@@ -455,6 +524,7 @@ function LabWorkspace({
 }: {
   spec: ExperimentSpec;
   setSpec: (spec: ExperimentSpec) => void;
+  question: string;
   phase: Phase;
   setPhase: (phase: Phase) => void;
   onExit: () => void;
@@ -462,12 +532,14 @@ function LabWorkspace({
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [launched, setLaunched] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [runToken, setRunToken] = useState(0);
   const [evidence, setEvidence] = useState<SimulationEvidence | null>(null);
   const [explanation, setExplanation] = useState("");
   const [evaluation, setEvaluation] = useState<EvaluationResponse | null>(null);
   const [firstCorrect, setFirstCorrect] = useState(false);
   const [transferCorrect, setTransferCorrect] = useState(false);
+  const [transferMode, setTransferMode] = useState(false);
   const [mastery, setMastery] = useState(25);
 
   useEffect(() => {
@@ -477,8 +549,12 @@ function LabWorkspace({
   }, [spec.misconception.id]);
 
   const capturing = phase === "running" || phase === "counterfactual-running";
-  const counterfactual = phase === "counterfactual-predicting" || phase === "counterfactual-running";
+  const counterfactual = transferMode || phase === "counterfactual-predicting" || phase === "counterfactual-running";
   const chosen = spec.prediction.choices.find((choice) => choice.id === selected);
+  const predictionLabel = chosen?.label ?? "an outcome that is still being tested";
+  const canEditControls = !launched && (phase === "predicting" || phase === "counterfactual-predicting");
+  const hasRun = launched || Boolean(evidence);
+  const airDensity = "airDensity" in spec.scene ? spec.scene.airDensity : 0;
 
   const run = () => {
     if (!selected || capturing) return;
@@ -500,12 +576,15 @@ function LabWorkspace({
     }
     setEvidence(null);
     setLaunched(true);
+    setPaused(false);
     setPhase(counterfactual ? "counterfactual-running" : "running");
   };
 
   const onComplete = useCallback(
     (result: SimulationEvidence) => {
       setEvidence(result);
+      setLaunched(false);
+      setPaused(false);
       const correct = chosen?.outcomeKey === result.outcomeKey;
       if (phase === "running") {
         setFirstCorrect(correct);
@@ -529,20 +608,51 @@ function LabWorkspace({
   );
 
   const evaluate = async () => {
+    const nextHint = spec.scene.family === "drop"
+      ? "Change shape while holding mass constant."
+      : spec.scene.family === "projectile"
+        ? "Change one velocity component at a time."
+        : "Change length while holding mass constant.";
     const fallback: EvaluationResponse = {
       score: Math.min(0.94, 0.58 + Math.min(explanation.trim().split(/\s+/).length, 24) / 70),
       criteria: { evidence: true, causality: /acceler|gravity|velocity|period|mass|length/i.test(explanation), transfer: explanation.length > 45 },
       feedback: `You connected the observed evidence to the underlying mechanism. The key refinement is that ${spec.misconception.description.toLowerCase()}`,
-      hint: spec.scene.family === "drop" ? "Change shape while holding mass constant." : spec.scene.family === "projectile" ? "Change one velocity component at a time." : "Change length while holding mass constant.",
+      hint: nextHint,
     };
     try {
       const response = await fetch("/api/evaluate", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ experimentId: spec.id, observedOutcome: evidence?.outcomeKey, studentExplanation: explanation, misconception: spec.misconception }),
+        body: JSON.stringify({
+          explanation,
+          context: {
+            family: spec.scene.family,
+            question: spec.prediction.reasoningPrompt,
+            concepts: [spec.misconception.id],
+          },
+        }),
       });
-      const data = response.ok ? ((await response.json()) as EvaluationResponse) : fallback;
-      setEvaluation(data);
+      if (!response.ok) {
+        setEvaluation(fallback);
+      } else {
+        const data = (await response.json()) as {
+          evaluation: {
+            scores: { correctness: number; mechanism: number; vocabulary: number };
+            feedback: string;
+          };
+          overall: number;
+        };
+        setEvaluation({
+          score: data.overall,
+          criteria: {
+            correctness: data.evaluation.scores.correctness >= 2,
+            mechanism: data.evaluation.scores.mechanism >= 2,
+            vocabulary: data.evaluation.scores.vocabulary >= 2,
+          },
+          feedback: data.evaluation.feedback,
+          hint: nextHint,
+        });
+      }
     } catch {
       setEvaluation(fallback);
     }
@@ -556,10 +666,13 @@ function LabWorkspace({
       return;
     }
     setSpec(applyCounterfactual(spec, next));
+    setTransferMode(true);
     setSelected(null);
     setExplanation("");
     setEvidence(null);
     setLaunched(false);
+    setPaused(false);
+    setEvaluation(null);
     setRunToken((value) => value + 1);
     setPhase("counterfactual-predicting");
   };
@@ -567,35 +680,59 @@ function LabWorkspace({
   const changeControl = (id: string, value: number) => {
     const control = spec.controls.find((item) => item.id === id);
     if (!control) return;
-    const updated = updateScenePath(spec, control.targetPath, value);
-    setSpec({ ...updated, controls: updated.controls.map((item) => (item.id === id ? { ...item, value } : item)) });
+    const nextValue = Math.min(control.max, Math.max(control.min, value));
+    const updated = updateScenePath(spec, control.targetPath, nextValue);
+    setSpec({ ...updated, controls: updated.controls.map((item) => (item.id === id ? { ...item, value: nextValue } : item)) });
     setRunToken((token) => token + 1);
+  };
+
+  const resetSimulation = () => {
+    setLaunched(false);
+    setPaused(false);
+    setEvidence(null);
+    setRunToken((value) => value + 1);
+    setPhase(counterfactual ? "counterfactual-predicting" : "predicting");
+  };
+
+  const replay = () => {
+    if (!selected || capturing) return;
+    setEvidence(null);
+    setPaused(false);
+    setLaunched(true);
+    setRunToken((value) => value + 1);
+    setPhase(counterfactual ? "counterfactual-running" : "running");
   };
 
   return (
     <main className="lab-workspace">
       <div className="lab-topline">
         <div className="lab-title-block">
-          <span className="family-chip">{spec.scene.family}</span>
           <div>
-            <h1>{spec.title}</h1>
-            <p>{spec.objective}</p>
-            {compilerNotice && (
-              <small className="compiler-notice">{compilerNotice}</small>
-            )}
+            <h1>{question}</h1>
+            <div className="experiment-meta">
+              <span>Experiment:</span>
+              <h2>{spec.title}</h2>
+              <i aria-hidden="true" />
+              <span>{counterfactual ? "Run 2 of 2" : "Run 1 of 2"}</span>
+            </div>
           </div>
         </div>
-        <ProgressRail phase={phase} />
-        <div className="mastery-pill"><BrainCircuit size={15} /><span>Mastery</span><strong>{mastery}%</strong></div>
+        <div className="lab-context">
+          {compilerNotice && <span className="compiler-notice"><ShieldCheck size={13} /> {compilerNotice}</span>}
+          <button type="button" className="environment-button" aria-label="Environment: Air on Earth">
+            <span><small>ENVIRONMENT</small>Air (Earth)</span><ChevronDown size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="lab-grid">
         <section className="simulation-stage">
           <div className="stage-toolbar">
-            <div><span className="status-light" /> {capturing ? "SIMULATION RUNNING" : launched ? "EVIDENCE CAPTURED" : "WORLD READY"}</div>
+            <div><span className="status-light" /> {capturing ? paused ? "SIMULATION PAUSED" : "SIMULATION RUNNING" : hasRun ? "EVIDENCE CAPTURED" : "WORLD READY"}</div>
             <div className="stage-tools">
-              <span>drag to orbit</span>
-              <button aria-label="Reset view and simulation" onClick={() => { setLaunched(false); setRunToken((value) => value + 1); setPhase(counterfactual ? "counterfactual-predicting" : "predicting"); }}><RotateCcw size={14} /></button>
+              <span>drag to inspect</span>
+              <button type="button" aria-label="Reset simulation" onClick={resetSimulation}><RotateCcw size={14} /></button>
+              <button type="button" aria-label="Expand simulation view"><Expand size={14} /></button>
             </div>
           </div>
           <div className="canvas-shell">
@@ -605,51 +742,93 @@ function LabWorkspace({
                 runToken={runToken}
                 launched={launched}
                 capturing={capturing}
+                paused={paused}
                 onComplete={onComplete}
               />
             </SimulationErrorBoundary>
-            <div className="canvas-vignette-copy">
-              <small>SOURCE MODEL</small>
-              <p>{spec.sourceSummary}</p>
+            <div className="experiment-readout">
+              <small>EXPERIMENT</small>
+              <strong>{spec.title}</strong>
+              <span><i className="status-light" /> {hasRun ? "Completed" : "Compiled"}</span>
             </div>
-            {capturing && <div className="capture-badge"><span /><Pause size={12} /> collecting evidence</div>}
+            <div className="environment-readout">
+              <span><i>g</i> {spec.scene.gravity.toFixed(2)} m/s²</span>
+              <span><i>ρ</i> {airDensity.toFixed(3)} kg/m³</span>
+            </div>
+            <div className="canvas-vignette-copy"><p>{spec.sourceSummary}</p></div>
+            {capturing && <div className="capture-badge"><span />{paused ? <Play size={12} /> : <Pause size={12} />} {paused ? "observation paused" : "collecting evidence"}</div>}
+          </div>
+          <div className="replay-bar" aria-label="Simulation playback controls">
+            <button
+              type="button"
+              className="playback-button"
+              disabled={!hasRun}
+              aria-label={capturing ? paused ? "Resume simulation" : "Pause simulation" : "Replay experiment"}
+              onClick={() => capturing ? setPaused((value) => !value) : replay()}
+            >
+              {capturing && !paused ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+            </button>
+            <span className="time-readout"><Timer size={14} /> {capturing ? paused ? "Paused" : "Recording live" : evidence ? `${evidence.duration.toFixed(2)} s captured` : "0.00 s / ready"}</span>
+            <div className={`timeline-track ${capturing ? "recording" : evidence ? "complete" : ""} ${paused ? "paused" : ""}`}><span /></div>
+            <span className="playback-rate">1×</span>
+            <button type="button" className="timeline-reset" aria-label="Reset experiment" onClick={resetSimulation}><RotateCcw size={15} /></button>
           </div>
           <div className="control-deck">
-            <div className="control-heading"><span><CircleGauge size={15} /> VARIABLES</span><small>{launched ? "locked during observation" : "change one thing at a time"}</small></div>
+            <div className="control-heading"><span><CircleGauge size={15} /> CONTROLLED VARIABLES</span><small>{hasRun ? "locked for this run" : "change one thing at a time"}</small></div>
             <div className="controls-grid">
-              {spec.controls.map((control) => (
-                <label key={control.id}>
-                  <span>{control.label}<strong>{control.value.toFixed(control.step < 1 ? 1 : 0)} {control.unit}</strong></span>
-                  <input type="range" min={control.min} max={control.max} step={control.step} value={control.value} disabled={launched || phase !== "predicting"} onChange={(event) => changeControl(control.id, Number(event.target.value))} />
-                </label>
+              {spec.controls.map((control, index) => (
+                <div key={control.id} className={`variable-control variable-${index + 1}`}>
+                  <label htmlFor={`control-${control.id}`}>{control.label}</label>
+                  <div className="stepper-control">
+                    <button type="button" disabled={!canEditControls || control.value <= control.min} aria-label={`Decrease ${control.label}`} onClick={() => changeControl(control.id, control.value - control.step)}><Minus size={14} /></button>
+                    <output htmlFor={`control-${control.id}`}>{control.value.toFixed(control.step < 1 ? 1 : 0)}</output>
+                    <button type="button" disabled={!canEditControls || control.value >= control.max} aria-label={`Increase ${control.label}`} onClick={() => changeControl(control.id, control.value + control.step)}><Plus size={14} /></button>
+                    <span>{control.unit}</span>
+                  </div>
+                  <input id={`control-${control.id}`} type="range" min={control.min} max={control.max} step={control.step} value={control.value} disabled={!canEditControls} onChange={(event) => changeControl(control.id, Number(event.target.value))} />
+                </div>
               ))}
             </div>
           </div>
         </section>
 
         <aside className="learning-panel">
-          {(phase === "predicting" || phase === "counterfactual-predicting" || phase === "running" || phase === "counterfactual-running") && (
-            <PredictionPanel
-              spec={spec}
-              selected={selected}
-              setSelected={setSelected}
-              onRun={run}
-              counterfactual={counterfactual}
-              running={capturing}
-            />
-          )}
-          {phase === "evidence" && evidence && <EvidencePanel spec={spec} evidence={evidence} explanation={explanation} setExplanation={setExplanation} onEvaluate={evaluate} />}
-          {phase === "explaining" && evaluation && <FeedbackPanel spec={spec} evaluation={evaluation} onChallenge={beginCounterfactual} />}
-          {phase === "complete" && <CompletePanel spec={spec} firstCorrect={firstCorrect} transferCorrect={transferCorrect} mastery={mastery} onRestart={onExit} />}
+          <div className="notebook-header">
+            <div><FlaskConical size={17} /><span>{phase === "predicting" || phase === "counterfactual-predicting" ? "HYPOTHESIS NOTEBOOK" : "EVIDENCE NOTEBOOK"}</span></div>
+            <button type="button" onClick={resetSimulation}><RotateCcw size={13} /> Clear run</button>
+          </div>
+          <div className="notebook-scroll">
+            {(phase === "predicting" || phase === "counterfactual-predicting" || phase === "running" || phase === "counterfactual-running") && (
+              <PredictionPanel
+                spec={spec}
+                selected={selected}
+                setSelected={setSelected}
+                onRun={run}
+                counterfactual={counterfactual}
+                running={capturing}
+              />
+            )}
+            {phase === "evidence" && evidence && <EvidencePanel spec={spec} evidence={evidence} predictionLabel={predictionLabel} explanation={explanation} setExplanation={setExplanation} onEvaluate={evaluate} />}
+            {phase === "explaining" && evaluation && evidence && <FeedbackPanel spec={spec} evidence={evidence} predictionLabel={predictionLabel} evaluation={evaluation} onChallenge={beginCounterfactual} />}
+            {phase === "complete" && <CompletePanel spec={spec} firstCorrect={firstCorrect} transferCorrect={transferCorrect} mastery={mastery} onRestart={onExit} />}
+          </div>
           {capturing && (
             <div className="running-overlay">
-              <div className="pulse-radar"><span /><span /><span /></div>
+              <Timer size={42} strokeWidth={1.2} aria-hidden="true" />
               <p>Reality is answering</p>
-              <small>Measuring at 10 samples / second</small>
+              <small>{paused ? "Observation paused" : "Measuring at 10 samples / second"}</small>
+              <div className="live-sample-strip"><span>POSITION</span><strong>LIVE</strong><span>VELOCITY</span></div>
             </div>
           )}
         </aside>
       </div>
+      <footer className="lab-mastery-footer">
+        <BadgeCheck size={15} />
+        <strong>MASTERY NOTE</strong>
+        <span>{phase === "complete" ? "You transferred the idea to a changed world." : `You are testing: ${spec.misconception.title.toLowerCase()}.`}</span>
+        <div className="footer-mastery-track" aria-label={`${mastery}% mastery`}><i style={{ width: `${mastery}%` }} /></div>
+        <b>{mastery}%</b>
+      </footer>
     </main>
   );
 }
@@ -664,6 +843,10 @@ export function CounterfactualLab() {
   const [error, setError] = useState<string | null>(null);
   const [compilerNotice, setCompilerNotice] = useState<string | null>(null);
   const [spec, setSpec] = useState<ExperimentSpec>(dropDemo);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [phase]);
 
   const reset = () => {
     setPhase("input");
@@ -742,7 +925,7 @@ export function CounterfactualLab() {
   const inLab = phase !== "input" && phase !== "compiling";
   return (
     <div className="app-shell">
-      <Header inLab={inLab} onExit={reset} />
+      <Header inLab={inLab} phase={phase} onExit={reset} />
       {phase === "input" && (
         <Landing
           prompt={prompt}
@@ -764,6 +947,7 @@ export function CounterfactualLab() {
           key={spec.id}
           spec={spec}
           setSpec={setSpec}
+          question={prompt.trim() || spec.objective}
           phase={phase}
           setPhase={setPhase}
           onExit={reset}
