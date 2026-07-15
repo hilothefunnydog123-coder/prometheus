@@ -34,7 +34,8 @@ This is not another chatbot or quiz generator:
 The compiler treats learner text, uploaded images, and text depicted inside an
 image as untrusted data.
 
-1. `analyzeInput` maps the question to drop, projectile, pendulum, or unsupported.
+1. `analyzeInput` maps the question to one of six supported mechanics families
+   or marks it unsupported.
 2. `compileExperiment` sends the exact source question through a forced JSON tool
    call and validates the returned declarative `ExperimentSpec`.
 3. Validation enforces schemas, numeric bounds, safe scene paths, content rules,
@@ -63,6 +64,9 @@ using the shared deterministic engine in `src/lib/physics/**`:
   0.92 m target radius.
 - Pendulum: nonlinear finite-amplitude and damped motion; period comparison within
   1%.
+- Spring: analytic damped harmonic motion with server-owned period comparisons.
+- Collision: exact one-dimensional momentum and restitution calculations.
+- Orbit: deterministic two-body energy classification and RK4 trajectories.
 
 The renderer, evidence layer, and compiler use the same outcome semantics.
 
@@ -73,8 +77,11 @@ The renderer, evidence layer, and compiler use the same outcome semantics.
 | Falling objects | The Galileo Drop | Heavier objects fall faster |
 | Projectile motion | The Hidden Second Motion | A forward force must keep acting |
 | Pendulums | The Massless Clock | A heavier bob swings faster |
+| Spring oscillators | The Resonance Engine | More mass makes the spring move faster |
+| Momentum collisions | The Momentum Exchange | The larger object always wins |
+| Orbital motion | The Orbital Window | Orbit means gravity has stopped |
 
-Unsupported material receives a safe `422` response naming the three supported
+Unsupported material receives a safe `422` response naming the six supported
 families instead of a fabricated simulation.
 
 ## Architecture
@@ -158,9 +165,9 @@ was generated for the learner's question.
 ```bash
 npm run lint
 npm run typecheck
-npm test                 # 212 unit/API tests; provider calls mocked
+npm test                 # 229 unit/API tests; provider calls mocked
 npm run build
-PLAYWRIGHT_PORT=3020 npm run test:e2e  # 4 full browser flows
+PLAYWRIGHT_PORT=3020 npm run test:e2e  # 7 full browser flows
 ```
 
 Set `PLAYWRIGHT_PORT` when another checkout already owns port 3000; this prevents
@@ -168,7 +175,8 @@ the E2E suite from silently testing a stale server.
 
 ## Current limitations
 
-- Three mechanics families; springs, collisions, and orbits are future work.
+- Six mechanics families cover core introductory mechanics; rotational dynamics,
+  fluids, circuits, and waves remain future work.
 - Mastery is stored per browser; there are no accounts or classroom dashboards.
 - Live generation and AI feedback require a configured provider.
 - The offline path uses a separate authored demo and a coarse keyword rubric,

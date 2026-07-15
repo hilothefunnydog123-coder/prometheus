@@ -1,9 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { ExperimentSpec } from "@/lib/contracts/experiment";
 import {
+  collisionDemo,
   dropDemo,
+  orbitDemo,
   pendulumDemo,
   projectileDemo,
+  springDemo,
 } from "@/components/lab/demo-experiments";
 
 type FamilyFlow = {
@@ -47,6 +50,39 @@ const flows: FamilyFlow[] = [
     explanation:
       "The measured period depends on string length and gravity, while the bob mass cancels from the timing.",
     spec: pendulumDemo,
+  },
+  {
+    card: "04 SPRING DYNAMICS How does stiffness change a spring’s period? Enter experiment",
+    labTitle: "The Resonance Engine",
+    initialChoice: "A The period increases",
+    counterfactualQuestion:
+      "With the stiffer spring, what happens to the oscillation period?",
+    counterfactualChoice: "B The period decreases",
+    explanation:
+      "The measured period increases because the larger mass has more inertia while the spring provides the restoring force.",
+    spec: springDemo,
+  },
+  {
+    card: "05 MOMENTUM How do masses exchange speed in a collision? Enter experiment",
+    labTitle: "The Momentum Exchange",
+    initialChoice: "A The lighter orange body",
+    counterfactualQuestion:
+      "With equal masses, which body leaves with the greater speed?",
+    counterfactualChoice: "B The blue body",
+    explanation:
+      "Momentum is conserved, and elasticity determines how the incoming relative speed is redistributed between the masses.",
+    spec: collisionDemo,
+  },
+  {
+    card: "06 ORBITAL MOTION What speed keeps a satellite in orbit? Enter experiment",
+    labTitle: "The Orbital Window",
+    initialChoice: "A A stable bound orbit",
+    counterfactualQuestion:
+      "After the speed increase, which trajectory follows?",
+    counterfactualChoice: "B An escape trajectory",
+    explanation:
+      "Gravity continuously bends the tangential motion into free fall while the measured energy remains below the escape threshold.",
+    spec: orbitDemo,
   },
 ];
 

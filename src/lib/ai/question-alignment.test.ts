@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { dropDemo, projectileDemo } from "@/components/lab/demo-experiments";
+import {
+  collisionDemo,
+  dropDemo,
+  orbitDemo,
+  projectileDemo,
+  springDemo,
+} from "@/components/lab/demo-experiments";
 import { questionAlignmentErrors } from "./question-alignment";
 
 function terminalVelocitySpec() {
@@ -71,5 +77,47 @@ describe("questionAlignmentErrors", () => {
         "How does launch angle affect projectile range?",
       ).join(" "),
     ).toContain("launch angle");
+  });
+
+  it("accepts question-specific spring, collision, and orbit labs", () => {
+    expect(
+      questionAlignmentErrors(
+        springDemo,
+        "How does stiffness change a spring's period?",
+      ),
+    ).toEqual([]);
+    expect(
+      questionAlignmentErrors(
+        collisionDemo,
+        "How do masses exchange speed in a collision?",
+      ),
+    ).toEqual([]);
+    expect(
+      questionAlignmentErrors(
+        orbitDemo,
+        "What speed keeps a satellite in orbit?",
+      ),
+    ).toEqual([]);
+  });
+
+  it("rejects a generic family substitution for each new mechanic", () => {
+    expect(
+      questionAlignmentErrors(
+        collisionDemo,
+        "How does stiffness change a spring's period?",
+      ).join(" "),
+    ).toContain("spring scene");
+    expect(
+      questionAlignmentErrors(
+        orbitDemo,
+        "How is momentum exchanged in an elastic collision?",
+      ).join(" "),
+    ).toContain("collision scene");
+    expect(
+      questionAlignmentErrors(
+        springDemo,
+        "What speed lets a satellite escape orbit?",
+      ).join(" "),
+    ).toContain("orbit scene");
   });
 });

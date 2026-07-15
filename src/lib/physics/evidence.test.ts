@@ -1,32 +1,43 @@
 import { describe, expect, it } from "vitest";
 import type {
+  CollisionScene,
   CounterfactualSpec,
   DropScene,
   ExperimentSpec,
+  OrbitScene,
   PendulumScene,
   ProjectileScene,
   SceneSpec,
+  SpringScene,
 } from "@/lib/contracts/experiment";
 import {
+  collisionDemo,
   dropDemo,
+  orbitDemo,
   pendulumDemo,
   projectileDemo,
+  springDemo,
 } from "@/components/lab/demo-experiments";
 import {
+  COLLISION_SPEED_TOLERANCE,
   DROP_TIE_TOLERANCE_SECONDS,
   PENDULUM_PERIOD_RELATIVE_TOLERANCE,
   PROJECTILE_AIR_DENSITY_KG_PER_CUBIC_METER,
   PROJECTILE_TARGET_RADIUS_METERS,
   applyCounterfactual,
   buildEvidence,
+  classifyCollisionSpeeds,
   classifyDropImpactTimes,
   classifyPendulumPeriods,
   classifyProjectileRange,
+  collisionMetrics,
   determineOutcome,
   isVelocityFocusedDrop,
+  orbitMetrics,
   pendulumPeriod,
   projectileMetrics,
   quadraticDragDropTime,
+  springPeriod,
   undampedPendulumPeriod,
   updateScenePath,
   vacuumDropTime,
@@ -51,6 +62,27 @@ function pendulumScene(): PendulumScene {
     throw new Error("pendulum fixture must use the pendulum scene");
   }
   return structuredClone(pendulumDemo.scene);
+}
+
+function springScene(): SpringScene {
+  if (springDemo.scene.family !== "spring") {
+    throw new Error("spring fixture must use the spring scene");
+  }
+  return structuredClone(springDemo.scene);
+}
+
+function collisionScene(): CollisionScene {
+  if (collisionDemo.scene.family !== "collision") {
+    throw new Error("collision fixture must use the collision scene");
+  }
+  return structuredClone(collisionDemo.scene);
+}
+
+function orbitScene(): OrbitScene {
+  if (orbitDemo.scene.family !== "orbit") {
+    throw new Error("orbit fixture must use the orbit scene");
+  }
+  return structuredClone(orbitDemo.scene);
 }
 
 function relativeError(actual: number, expected: number) {
@@ -387,6 +419,108 @@ describe("pendulum motion", () => {
     expect(classifyPendulumPeriods(null, null)).toBe("period_unchanged");
     expect(classifyPendulumPeriods(2, null)).toBe("period_increases");
     expect(classifyPendulumPeriods(null, 2)).toBe("period_decreases");
+  });
+});
+
+describe("spring motion", () => {
+  it("matches the analytic undamped mass-spring period", () => {
+    const scene = springScene();
+    scene.damping = 0;
+    const expected =
+      2 * Math.PI * Math.sqrt(scene.body.mass / scene.springConstant);
+    expect(springPeriod(scene)).toBeCloseTo(expected, 12);
+  });
+
+  it("derives comparison outcomes from mass and stiffness", () => {
+    const reference = springScene();
+    const heavier = structuredClone(reference);
+    heavier.body.mass *= 4;
+    const stiffer = structuredClone(reference);
+    stiffer.springConstant *= 2;
+    expect(determineOutcome(heavier, reference)).toBe("period_increases");
+    expect(determineOutcome(stiffer, reference)).toBe("period_decreases");
+    expect(buildEvidence(springDemo).outcomeKey).toBe("period_increases");
+  });
+
+  it("conserves energy without damping and dissipates it with damping", () => {
+    const undamped = springScene();
+    undamped.damping = 0;
+    const conserved = buildEvidence({ ...springDemo, scene: undamped });
+    const energies = conserved.points.map((point) => point.tertiary!);
+    expect(
+      (Math.max(...energies) - Math.min(...energies)) / energies[0]!,
+    ).toBeLessThan(1e-10);
+
+    const damped = springScene();
+    damped.damping = 2;
+    const dissipated = buildEvidence({ ...springDemo, scene: damped });
+    expect(dissipated.points.at(-1)!.tertiary!).toBeLessThan(
+      dissipated.points[0]!.tertiary!,
+    );
+  });
+});
+
+describe("momentum collisions", () => {
+  it("conserves momentum and applies the restitution equation", () => {
+    const scene = collisionScene();
+    const metrics = collisionMetrics(scene);
+    expect(metrics.finalMomentum).toBeCloseTo(metrics.initialMomentum, 12);
+    expect(
+      metrics.finalVelocityB - metrics.finalVelocityA,
+    ).toBeCloseTo(
+      scene.restitution *
+        (scene.objects[0].initialVelocity -
+          scene.objects[1].initialVelocity),
+      12,
+    );
+  });
+
+  it("classifies outgoing speeds with a deterministic tolerance", () => {
+    expect(COLLISION_SPEED_TOLERANCE).toBe(0.05);
+    expect(classifyCollisionSpeeds(2, 2.05)).toBe("same_speed");
+    expect(classifyCollisionSpeeds(2.06, 2)).toBe("object_a_faster");
+    expect(determineOutcome(collisionDemo.scene)).toBe("object_a_faster");
+    const changed = applyCounterfactual(
+      collisionDemo,
+      collisionDemo.counterfactuals[0]!,
+    );
+    expect(buildEvidence(changed).outcomeKey).toBe("object_b_faster");
+  });
+
+  it("rejects bodies that cannot collide", () => {
+    const scene = collisionScene();
+    scene.objects[0].initialVelocity = -1;
+    scene.objects[1].initialVelocity = 1;
+    expect(() => collisionMetrics(scene)).toThrow("moving toward");
+  });
+});
+
+describe("orbital motion", () => {
+  it("classifies circular, escape, and impact trajectories from energy", () => {
+    const circular = orbitScene();
+    const circularMetrics = orbitMetrics(circular);
+    expect(circularMetrics.outcomeKey).toBe("stable_orbit");
+    expect(circularMetrics.eccentricity).toBeCloseTo(0, 12);
+
+    const escape = structuredClone(circular);
+    escape.initialSpeed = circularMetrics.escapeSpeed * 1.01;
+    expect(orbitMetrics(escape).outcomeKey).toBe("escape");
+
+    const impact = structuredClone(circular);
+    impact.initialSpeed = 0.5;
+    expect(orbitMetrics(impact).outcomeKey).toBe("impact");
+  });
+
+  it("keeps a numerically integrated circular orbit at constant radius", () => {
+    const evidence = buildEvidence(orbitDemo);
+    const radii = evidence.points.map((point) =>
+      Math.hypot(point.primary, point.secondary ?? 0),
+    );
+    const expected = orbitScene().orbitalRadius;
+    expect(Math.max(...radii.map((radius) => Math.abs(radius - expected)))).toBeLessThan(
+      1e-6,
+    );
+    expect(evidence.outcomeKey).toBe("stable_orbit");
   });
 });
 

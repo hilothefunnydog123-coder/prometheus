@@ -1,7 +1,14 @@
 "use client";
 
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Html, Line, OrbitControls, RoundedBox, Sparkles } from "@react-three/drei";
+import {
+  Html,
+  Line,
+  OrbitControls,
+  RoundedBox,
+  Sparkles,
+  Stars,
+} from "@react-three/drei";
 import {
   BallCollider,
   CuboidCollider,
@@ -10,16 +17,34 @@ import {
   type RapierRigidBody,
   useSphericalJoint,
 } from "@react-three/rapier";
+import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import { Atom } from "lucide-react";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type RefObject,
+} from "react";
 import * as THREE from "three";
 import type {
+  CollisionScene as CollisionSceneSpec,
   DropScene as DropSceneSpec,
   ExperimentSpec,
+  OrbitScene as OrbitSceneSpec,
   PendulumScene as PendulumSceneSpec,
   ProjectileScene as ProjectileSceneSpec,
+  SpringScene as SpringSceneSpec,
 } from "@/lib/contracts/experiment";
-import { buildEvidence, type SimulationEvidence } from "@/lib/physics/evidence";
+import {
+  buildEvidence,
+  collisionMetrics,
+  type EvidencePoint,
+  type SimulationEvidence,
+} from "@/lib/physics/evidence";
 
 type ExperimentCanvasProps = {
   spec: ExperimentSpec;
@@ -29,6 +54,51 @@ type ExperimentCanvasProps = {
   paused: boolean;
   onComplete: (evidence: SimulationEvidence) => void;
 };
+
+function evidencePointAt(points: EvidencePoint[], time: number): EvidencePoint {
+  const last = points.at(-1)!;
+  if (time <= points[0]!.time) return points[0]!;
+  if (time >= last.time) return last;
+  const upperIndex = points.findIndex((point) => point.time >= time);
+  const upper = points[upperIndex]!;
+  const lower = points[upperIndex - 1]!;
+  const span = Math.max(upper.time - lower.time, Number.EPSILON);
+  const mix = (time - lower.time) / span;
+  const interpolate = (a?: number, b?: number) =>
+    a === undefined || b === undefined
+      ? undefined
+      : THREE.MathUtils.lerp(a, b, mix);
+  return {
+    time,
+    primary: THREE.MathUtils.lerp(lower.primary, upper.primary, mix),
+    secondary: interpolate(lower.secondary, upper.secondary),
+    tertiary: interpolate(lower.tertiary, upper.tertiary),
+    primaryVelocity: interpolate(
+      lower.primaryVelocity,
+      upper.primaryVelocity,
+    ),
+    secondaryVelocity: interpolate(
+      lower.secondaryVelocity,
+      upper.secondaryVelocity,
+    ),
+  };
+}
+
+function playbackTime(
+  elapsed: MutableRefObject<number>,
+  duration: number,
+  launched: boolean,
+  paused: boolean,
+  delta: number,
+) {
+  if (!launched) {
+    elapsed.current = 0;
+    return 0;
+  }
+  if (!paused) elapsed.current += Math.min(delta, 0.25);
+  const screenDuration = Math.min(duration + 0.5, 6.2);
+  return Math.min(duration, (elapsed.current / screenDuration) * duration);
+}
 
 function LabFloor({ span = 28 }: { span?: number }) {
   return (
@@ -280,6 +350,458 @@ function PendulumScene({ scene, launched }: { scene: PendulumSceneSpec; launched
   );
 }
 
+function SpringScene({
+  spec,
+  scene,
+  launched,
+  paused,
+}: {
+  spec: ExperimentSpec;
+  scene: SpringSceneSpec;
+  launched: boolean;
+  paused: boolean;
+}) {
+  const evidence = useMemo(() => buildEvidence(spec), [spec]);
+  const elapsed = useRef(0);
+  const body = useRef<THREE.Group>(null);
+  const coil = useRef<THREE.Group>(null);
+  const halo = useRef<THREE.Mesh>(null);
+  const anchorX = -4.2;
+  const visualScale = 0.72;
+  const coilPoints = useMemo(
+    () =>
+      Array.from({ length: 120 }, (_, index) => {
+        const ratio = index / 119;
+        const taper = Math.sin(Math.PI * ratio);
+        return new THREE.Vector3(
+          ratio,
+          Math.sin(ratio * Math.PI * 24) * 0.25 * taper,
+          Math.cos(ratio * Math.PI * 24) * 0.25 * taper,
+        );
+      }),
+    [],
+  );
+
+  useFrame((_, delta) => {
+    const time = playbackTime(
+      elapsed,
+      evidence.duration,
+      launched,
+      paused,
+      delta,
+    );
+    const sample = evidencePointAt(evidence.points, time);
+    const length = Math.max(
+      0.45,
+      (scene.restLength + sample.primary) * visualScale,
+    );
+    if (body.current) {
+      body.current.position.x = anchorX + length;
+      body.current.rotation.x += paused ? 0 : delta * 0.18;
+      body.current.rotation.y += paused ? 0 : delta * 0.32;
+    }
+    if (coil.current) coil.current.scale.x = length;
+    if (halo.current) {
+      const pulse = 1 + 0.08 * Math.sin(time * 7);
+      halo.current.scale.setScalar(pulse);
+    }
+  });
+
+  const initialLength = (scene.restLength + scene.amplitude) * visualScale;
+  return (
+    <group position={[0, 2.6, 0]}>
+      <LabFloor span={18} />
+      <RoundedBox
+        args={[0.58, 5.2, 2.2]}
+        position={[anchorX - 0.3, 0, 0]}
+        radius={0.18}
+        castShadow
+      >
+        <meshPhysicalMaterial
+          color="#101d2a"
+          metalness={0.88}
+          roughness={0.22}
+          clearcoat={0.8}
+        />
+      </RoundedBox>
+      <group
+        ref={coil}
+        position={[anchorX, 0, 0]}
+        scale={[initialLength, 1, 1]}
+      >
+        <Line
+          points={coilPoints}
+          color="#63e7ff"
+          lineWidth={2.2}
+          transparent
+          opacity={0.94}
+        />
+        <pointLight
+          color="#5de1ff"
+          intensity={4}
+          distance={5}
+          position={[0.5, 0, 0]}
+        />
+      </group>
+      <group ref={body} position={[anchorX + initialLength, 0, 0]}>
+        <RoundedBox args={[1.35, 1.35, 1.35]} radius={0.28} castShadow>
+          <meshPhysicalMaterial
+            color={scene.body.color}
+            emissive={scene.body.color}
+            emissiveIntensity={0.58}
+            metalness={0.72}
+            roughness={0.15}
+            clearcoat={1}
+          />
+        </RoundedBox>
+        <mesh ref={halo} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[1.02, 0.035, 12, 72]} />
+          <meshBasicMaterial
+            color="#ffb06f"
+            transparent
+            opacity={0.72}
+            toneMapped={false}
+          />
+        </mesh>
+        <pointLight color={scene.body.color} intensity={5} distance={6} />
+      </group>
+      <Line
+        points={[
+          [-4.2, -1.15, 0],
+          [5.4, -1.15, 0],
+        ]}
+        color="#284554"
+        lineWidth={2}
+      />
+      {Array.from({ length: 17 }, (_, index) => (
+        <mesh key={index} position={[-4 + index * 0.58, -1.15, 0]}>
+          <boxGeometry args={[0.025, 0.18, 0.6]} />
+          <meshBasicMaterial
+            color={index % 4 === 0 ? "#ff8a3d" : "#266074"}
+          />
+        </mesh>
+      ))}
+      <Html position={[0.2, 2.05, 0]} center distanceFactor={12}>
+        <span className="scene-label">
+          k {scene.springConstant.toFixed(0)} N/m ·{" "}
+          {scene.body.mass.toFixed(1)} kg
+        </span>
+      </Html>
+      <Sparkles
+        count={55}
+        scale={[11, 4, 4]}
+        size={1.4}
+        speed={0.22}
+        color="#5de1ff"
+        opacity={0.34}
+      />
+    </group>
+  );
+}
+
+function CollisionBody({
+  object,
+  objectRef,
+}: {
+  object: CollisionSceneSpec["objects"][number];
+  objectRef: RefObject<THREE.Group | null>;
+}) {
+  return (
+    <group ref={objectRef} position={[0, 1.05, 0]}>
+      <mesh castShadow>
+        <sphereGeometry args={[Math.max(0.58, object.radius), 56, 40]} />
+        <meshPhysicalMaterial
+          color={object.color}
+          emissive={object.color}
+          emissiveIntensity={0.72}
+          metalness={0.64}
+          roughness={0.14}
+          clearcoat={1}
+        />
+      </mesh>
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry
+          args={[Math.max(0.72, object.radius * 1.18), 0.045, 12, 72]}
+        />
+        <meshBasicMaterial color={object.color} toneMapped={false} />
+      </mesh>
+      <pointLight color={object.color} intensity={4.5} distance={5} />
+    </group>
+  );
+}
+
+function CollisionScene({
+  spec,
+  scene,
+  launched,
+  paused,
+}: {
+  spec: ExperimentSpec;
+  scene: CollisionSceneSpec;
+  launched: boolean;
+  paused: boolean;
+}) {
+  const evidence = useMemo(() => buildEvidence(spec), [spec]);
+  const metrics = useMemo(() => collisionMetrics(scene), [scene]);
+  const elapsed = useRef(0);
+  const bodyA = useRef<THREE.Group>(null);
+  const bodyB = useRef<THREE.Group>(null);
+  const impact = useRef<THREE.Group>(null);
+  const impactMaterial = useRef<THREE.MeshBasicMaterial>(null);
+  const maximumExtent = Math.max(
+    scene.trackLength / 2,
+    ...evidence.points.flatMap((point) => [
+      Math.abs(point.primary),
+      Math.abs(point.secondary ?? 0),
+    ]),
+  );
+  const sceneScale = Math.min(1, 7.5 / maximumExtent);
+
+  useFrame((_, delta) => {
+    const time = playbackTime(
+      elapsed,
+      evidence.duration,
+      launched,
+      paused,
+      delta,
+    );
+    const sample = evidencePointAt(evidence.points, time);
+    if (bodyA.current) {
+      bodyA.current.position.x = sample.primary * sceneScale;
+      bodyA.current.rotation.z -=
+        paused ? 0 : delta * (sample.primaryVelocity ?? 0);
+    }
+    if (bodyB.current) {
+      bodyB.current.position.x = (sample.secondary ?? 0) * sceneScale;
+      bodyB.current.rotation.z -=
+        paused ? 0 : delta * (sample.secondaryVelocity ?? 0);
+    }
+    const impactAge = time - metrics.collisionTime;
+    const visible = impactAge >= 0 && impactAge < 0.65;
+    if (impact.current) {
+      impact.current.visible = visible;
+      impact.current.scale.setScalar(0.4 + Math.max(0, impactAge) * 3.8);
+    }
+    if (impactMaterial.current) {
+      impactMaterial.current.opacity = visible
+        ? Math.max(0, 0.9 - impactAge * 1.3)
+        : 0;
+    }
+  });
+
+  return (
+    <group>
+      <LabFloor span={20} />
+      <RoundedBox
+        args={[17, 0.25, 1.55]}
+        position={[0, 0.25, 0]}
+        radius={0.12}
+        castShadow
+      >
+        <meshPhysicalMaterial
+          color="#0c1a25"
+          metalness={0.86}
+          roughness={0.2}
+          clearcoat={0.6}
+        />
+      </RoundedBox>
+      <Line
+        points={[
+          [-8.2, 0.48, -0.54],
+          [8.2, 0.48, -0.54],
+        ]}
+        color="#267287"
+        lineWidth={2}
+      />
+      <Line
+        points={[
+          [-8.2, 0.48, 0.54],
+          [8.2, 0.48, 0.54],
+        ]}
+        color="#267287"
+        lineWidth={2}
+      />
+      <CollisionBody object={scene.objects[0]} objectRef={bodyA} />
+      <CollisionBody object={scene.objects[1]} objectRef={bodyB} />
+      <group ref={impact} visible={false} position={[0, 1.05, 0]}>
+        <mesh rotation={[0, Math.PI / 2, 0]}>
+          <ringGeometry args={[0.55, 0.68, 64]} />
+          <meshBasicMaterial
+            ref={impactMaterial}
+            color="#fff1d2"
+            transparent
+            opacity={0}
+            side={THREE.DoubleSide}
+            toneMapped={false}
+          />
+        </mesh>
+        <pointLight color="#fff0be" intensity={8} distance={6} />
+      </group>
+      <Html position={[0, 3.25, 0]} center distanceFactor={12}>
+        <span className="scene-label">
+          momentum rail · restitution {scene.restitution.toFixed(2)}
+        </span>
+      </Html>
+      <Sparkles
+        count={48}
+        scale={[18, 4, 5]}
+        size={1.1}
+        speed={0.3}
+        color="#a8f3ff"
+        opacity={0.3}
+      />
+    </group>
+  );
+}
+
+function OrbitScene({
+  spec,
+  scene,
+  launched,
+  paused,
+}: {
+  spec: ExperimentSpec;
+  scene: OrbitSceneSpec;
+  launched: boolean;
+  paused: boolean;
+}) {
+  const evidence = useMemo(() => buildEvidence(spec), [spec]);
+  const elapsed = useRef(0);
+  const satellite = useRef<THREE.Group>(null);
+  const planet = useRef<THREE.Group>(null);
+  const trajectoryScale = 5.25 / scene.orbitalRadius;
+  const mapPosition = useCallback(
+    (x: number, z: number): [number, number, number] => {
+      const vector = new THREE.Vector2(
+        x * trajectoryScale,
+        z * trajectoryScale,
+      );
+      if (vector.length() > 8) vector.setLength(8);
+      return [vector.x, 0.28, vector.y];
+    },
+    [trajectoryScale],
+  );
+  const path = useMemo(
+    () =>
+      evidence.points.map((point) =>
+        mapPosition(point.primary, point.secondary ?? 0),
+      ),
+    [evidence.points, mapPosition],
+  );
+  const planetRadius = Math.max(
+    0.8,
+    Math.min(1.65, scene.centralRadius * trajectoryScale * 0.72),
+  );
+
+  useFrame((_, delta) => {
+    const time = playbackTime(
+      elapsed,
+      evidence.duration,
+      launched,
+      paused,
+      delta,
+    );
+    const sample = evidencePointAt(evidence.points, time);
+    if (satellite.current) {
+      satellite.current.position.set(
+        ...mapPosition(sample.primary, sample.secondary ?? 0),
+      );
+      satellite.current.rotation.y += paused ? 0 : delta * 1.25;
+      satellite.current.rotation.z += paused ? 0 : delta * 0.35;
+    }
+    if (planet.current && !paused) planet.current.rotation.y += delta * 0.08;
+  });
+
+  return (
+    <group rotation={[0.08, 0, -0.08]}>
+      <Stars
+        radius={70}
+        depth={34}
+        count={1800}
+        factor={3}
+        saturation={0.35}
+        fade
+        speed={0.35}
+      />
+      <group ref={planet}>
+        <mesh castShadow>
+          <sphereGeometry args={[planetRadius, 72, 48]} />
+          <meshPhysicalMaterial
+            color="#0a4167"
+            emissive="#0a7f9f"
+            emissiveIntensity={0.42}
+            roughness={0.6}
+            metalness={0.08}
+            clearcoat={0.42}
+          />
+        </mesh>
+        <mesh scale={1.09}>
+          <sphereGeometry args={[planetRadius, 64, 40]} />
+          <meshBasicMaterial
+            color="#45ddff"
+            transparent
+            opacity={0.14}
+            side={THREE.BackSide}
+            toneMapped={false}
+          />
+        </mesh>
+        <mesh rotation={[Math.PI / 2.25, 0, 0]}>
+          <torusGeometry args={[planetRadius * 1.35, 0.025, 12, 120]} />
+          <meshBasicMaterial
+            color="#52dfff"
+            transparent
+            opacity={0.34}
+            toneMapped={false}
+          />
+        </mesh>
+        <pointLight color="#63dcff" intensity={8} distance={11} />
+      </group>
+      <Line
+        points={path}
+        color="#77ffc4"
+        lineWidth={1.8}
+        transparent
+        opacity={launched ? 0.46 : 0.8}
+      />
+      <group
+        ref={satellite}
+        position={mapPosition(scene.orbitalRadius, 0)}
+      >
+        <mesh castShadow>
+          <octahedronGeometry args={[0.34, 1]} />
+          <meshPhysicalMaterial
+            color={scene.satellite.color}
+            emissive={scene.satellite.color}
+            emissiveIntensity={0.8}
+            metalness={0.78}
+            roughness={0.14}
+            clearcoat={1}
+          />
+        </mesh>
+        <RoundedBox args={[1.45, 0.12, 0.58]} radius={0.04}>
+          <meshStandardMaterial
+            color="#184b72"
+            emissive="#1f81ae"
+            emissiveIntensity={0.58}
+            metalness={0.64}
+            roughness={0.24}
+          />
+        </RoundedBox>
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.55, 0.025, 10, 64]} />
+          <meshBasicMaterial color="#b3ffe1" toneMapped={false} />
+        </mesh>
+        <pointLight color={scene.satellite.color} intensity={5} distance={5} />
+      </group>
+      <Html position={[0, 3.25, 0]} center distanceFactor={12}>
+        <span className="scene-label">
+          orbital telemetry · {scene.initialSpeed.toFixed(1)} m/s
+        </span>
+      </Html>
+    </group>
+  );
+}
+
 function SimulationTimer({
   active,
   spec,
@@ -328,6 +850,8 @@ function World({
   onComplete,
   onReady,
 }: Omit<ExperimentCanvasProps, "runToken"> & { onReady: () => void }) {
+  const gravity: [number, number, number] =
+    "gravity" in spec.scene ? [0, -spec.scene.gravity, 0] : [0, 0, 0];
   return (
     <>
       <color attach="background" args={["#050810"]} />
@@ -337,14 +861,47 @@ function World({
       <spotLight position={[-8, 10, 3]} intensity={90} angle={0.34} penumbra={0.8} color="#ff7138" />
       <spotLight position={[8, 9, -4]} intensity={70} angle={0.38} penumbra={0.85} color="#42d9ff" />
       <Suspense fallback={null}>
-        <Physics gravity={[0, -spec.scene.gravity, 0]} timeStep={1 / 60} interpolate colliders={false} paused={paused}>
+        <Physics gravity={gravity} timeStep={1 / 60} interpolate colliders={false} paused={paused}>
           {spec.scene.family === "drop" && <DropScene scene={spec.scene} launched={launched} />}
           {spec.scene.family === "projectile" && <ProjectileScene scene={spec.scene} launched={launched} />}
           {spec.scene.family === "pendulum" && <PendulumScene scene={spec.scene} launched={launched} />}
+          {spec.scene.family === "spring" && (
+            <SpringScene
+              spec={spec}
+              scene={spec.scene}
+              launched={launched}
+              paused={paused}
+            />
+          )}
+          {spec.scene.family === "collision" && (
+            <CollisionScene
+              spec={spec}
+              scene={spec.scene}
+              launched={launched}
+              paused={paused}
+            />
+          )}
+          {spec.scene.family === "orbit" && (
+            <OrbitScene
+              spec={spec}
+              scene={spec.scene}
+              launched={launched}
+              paused={paused}
+            />
+          )}
           <SimulationTimer active={capturing && !paused} spec={spec} onComplete={onComplete} />
           <SceneReady onReady={onReady} />
         </Physics>
       </Suspense>
+      <EffectComposer multisampling={0}>
+        <Bloom
+          mipmapBlur
+          intensity={0.72}
+          luminanceThreshold={0.72}
+          luminanceSmoothing={0.3}
+        />
+        <Vignette eskil={false} offset={0.18} darkness={0.58} />
+      </EffectComposer>
       <OrbitControls
         makeDefault
         enablePan={false}
@@ -357,7 +914,11 @@ function World({
             ? [3, 2.5, 0]
             : spec.scene.family === "drop"
               ? [0, 4.25, 0]
-              : [0, 3, 0]
+              : spec.scene.family === "pendulum"
+                ? [0, 3, 0]
+                : spec.scene.family === "spring"
+                  ? [-1.45, 2.4, 0]
+                  : [0, 0.7, 0]
         }
       />
     </>
@@ -403,7 +964,13 @@ export function ExperimentCanvas({ spec, runToken, launched, capturing, paused, 
       ? ({ position: [5, 8, 18], fov: 46 } as const)
       : spec.scene.family === "drop"
         ? ({ position: [6.3, 6.4, 11.4], fov: 37 } as const)
-        : ({ position: [8, 7, 13], fov: 44 } as const);
+        : spec.scene.family === "orbit"
+          ? ({ position: [8.5, 8.2, 11.8], fov: 46 } as const)
+          : spec.scene.family === "collision"
+            ? ({ position: [9, 6.2, 14], fov: 43 } as const)
+            : spec.scene.family === "spring"
+              ? ({ position: [5.2, 5.3, 9.6], fov: 40 } as const)
+              : ({ position: [8, 7, 13], fov: 44 } as const);
   return (
     <>
       <Canvas

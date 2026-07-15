@@ -238,7 +238,14 @@ describe("POST /api/compile", () => {
     expect(response.status).toBe(422);
     const body = (await response.json()) as ErrorBody;
     expect(body.error.code).toBe("unsupported_material");
-    for (const family of ["drop", "projectile", "pendulum"]) {
+    for (const family of [
+      "drop",
+      "projectile",
+      "pendulum",
+      "spring",
+      "collision",
+      "orbit",
+    ]) {
       expect(body.error.message).toContain(family);
     }
     expect(body.error.message).not.toMatch(/[<>]/);

@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import {
   ArrowLeft,
+  ArrowLeftRight,
   ArrowRight,
   Atom,
   BadgeCheck,
@@ -28,6 +29,7 @@ import {
   Timer,
   Upload,
   Wind,
+  Waves,
   X,
   Zap,
 } from "lucide-react";
@@ -93,6 +95,9 @@ const exampleMeta = [
   { id: "drop", icon: CircleGauge, kicker: "FREE FALL", question: "Do heavier objects fall faster?" },
   { id: "projectile", icon: Target, kicker: "PROJECTILES", question: "Why does a thrown ball follow an arc?" },
   { id: "pendulum", icon: Atom, kicker: "OSCILLATION", question: "Does a heavier pendulum swing faster?" },
+  { id: "spring", icon: Waves, kicker: "SPRING DYNAMICS", question: "How does stiffness change a spring’s period?" },
+  { id: "collision", icon: ArrowLeftRight, kicker: "MOMENTUM", question: "How do masses exchange speed in a collision?" },
+  { id: "orbit", icon: Orbit, kicker: "ORBITAL MOTION", question: "What speed keeps a satellite in orbit?" },
 ];
 
 type ValidatedExampleOffer = {
@@ -273,7 +278,7 @@ function Landing({
             Turn any mechanics question or textbook diagram into a living 3D experiment. Predict it. Run it. Prove it.
           </p>
           <div className="impact-row">
-            <div><strong>03</strong><span>physics engines</span></div>
+            <div><strong>06</strong><span>physics engines</span></div>
             <div><strong>∞</strong><span>counterfactuals</span></div>
             <div><strong>0</strong><span>answers handed to you</span></div>
           </div>
@@ -289,7 +294,8 @@ function Landing({
           </div>
           <label htmlFor="experiment-question">What do you want to understand?</label>
           <p id="experiment-scope" className="prompt-scope">
-            Supported now: falling objects, projectile motion, and pendulums.
+            Supported now: free fall, projectiles, pendulums, springs,
+            collisions, and orbital motion.
           </p>
           <textarea
             id="experiment-question"
@@ -343,7 +349,7 @@ function Landing({
 
       <section className="example-section">
         <div className="section-heading">
-          <div><p className="eyebrow">START WITH A PROVEN PARADOX</p><h2>Three worlds. One way of thinking.</h2></div>
+          <div><p className="eyebrow">START WITH A PROVEN PARADOX</p><h2>Six worlds. One way of thinking.</h2></div>
           <p>Every lab begins with a prediction—because seeing an answer is not the same as changing your mind.</p>
         </div>
         <div className="example-grid">
@@ -464,7 +470,16 @@ function chartTitle(spec: ExperimentSpec) {
   if (spec.scene.family === "projectile") {
     return "Position and height vs. time";
   }
-  return "Angle and speed vs. time";
+  if (spec.scene.family === "pendulum") {
+    return "Angle and speed vs. time";
+  }
+  if (spec.scene.family === "spring") {
+    return "Displacement and velocity vs. time";
+  }
+  if (spec.scene.family === "collision") {
+    return "Object positions vs. time";
+  }
+  return "Orbital position vs. time";
 }
 
 function precisionForStep(step: number) {
@@ -695,7 +710,33 @@ function LabWorkspace({
                 ? PROJECTILE_AIR_DENSITY_KG_PER_CUBIC_METER
                 : 0,
           }
-        : { name: "Idealized lab", density: 0 };
+        : spec.scene.family === "spring"
+          ? { name: "Resonance chamber", density: 0 }
+          : spec.scene.family === "collision"
+            ? { name: "Low-friction rail", density: 0 }
+            : spec.scene.family === "orbit"
+              ? { name: "Orbital vacuum", density: 0 }
+              : { name: "Idealized lab", density: 0 };
+  const telemetry =
+    spec.scene.family === "spring"
+      ? [
+          { symbol: "k", value: `${spec.scene.springConstant.toFixed(1)} N/m` },
+          { symbol: "c", value: `${spec.scene.damping.toFixed(2)} N·s/m` },
+        ]
+      : spec.scene.family === "collision"
+        ? [
+            { symbol: "e", value: spec.scene.restitution.toFixed(2) },
+            { symbol: "L", value: `${spec.scene.trackLength.toFixed(1)} m` },
+          ]
+        : spec.scene.family === "orbit"
+          ? [
+              { symbol: "μ", value: spec.scene.gravitationalParameter.toFixed(2) },
+              { symbol: "r₀", value: `${spec.scene.orbitalRadius.toFixed(2)} m` },
+            ]
+          : [
+              { symbol: "g", value: `${spec.scene.gravity.toFixed(2)} m/s²` },
+              { symbol: "ρ", value: `${environment.density.toFixed(3)} kg/m³` },
+            ];
 
   const run = () => {
     if (!selected || capturing) return;
@@ -913,8 +954,9 @@ function LabWorkspace({
               <span><i className="status-light" /> {hasRun ? "Completed" : "Compiled"}</span>
             </div>
             <div className="environment-readout">
-              <span><i>g</i> {spec.scene.gravity.toFixed(2)} m/s²</span>
-              <span><i>ρ</i> {environment.density.toFixed(3)} kg/m³</span>
+              {telemetry.map((item) => (
+                <span key={item.symbol}><i>{item.symbol}</i> {item.value}</span>
+              ))}
             </div>
             <div className="canvas-vignette-copy"><p>{spec.sourceSummary}</p></div>
             {capturing && <div className="capture-badge"><span />{paused ? <Play size={12} /> : <Pause size={12} />} {paused ? "observation paused" : "collecting evidence"}</div>}

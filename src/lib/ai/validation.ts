@@ -118,10 +118,14 @@ function checkPatchedScene(
   if (!reparsed.success) {
     return [`${label}: patched scene violates contract bounds`];
   }
-  if (sceneDuration(patched) === null) {
-    return [
-      `${label}: patched experiment does not finish within ${MAX_SIMULATED_SECONDS} s`,
-    ];
+  try {
+    if (sceneDuration(patched) === null) {
+      return [
+        `${label}: patched experiment does not finish within ${MAX_SIMULATED_SECONDS} s`,
+      ];
+    }
+  } catch {
+    return [`${label}: patched scene is not physically runnable`];
   }
   return [];
 }
@@ -232,20 +236,58 @@ function checkFamilyRequirements(spec: ExperimentSpec): string[] {
     if (a.id === b.id) {
       errors.push("scene.objects: the two drop objects must have distinct ids");
     }
+    if (a.color.toLowerCase() === b.color.toLowerCase()) {
+      errors.push("scene.objects: the two drop objects must have distinct colors");
+    }
   }
   if (spec.scene.family === "projectile" && spec.scene.targetDistance === undefined) {
     errors.push(
       "scene.targetDistance: required — undershoot/hit/overshoot predictions need a target",
     );
   }
-  if (spec.scene.family === "pendulum" && !spec.prediction.testChange) {
+  if (spec.scene.family === "collision") {
+    const [a, b] = spec.scene.objects;
+    if (a.id === b.id) {
+      errors.push("scene.objects: the two collision objects must have distinct ids");
+    }
+    if (a.color.toLowerCase() === b.color.toLowerCase()) {
+      errors.push("scene.objects: the two collision objects must have distinct colors");
+    }
+    const closingSpeed = a.initialVelocity - b.initialVelocity;
+    if (closingSpeed <= 0) {
+      errors.push("scene.objects: collision objects must move toward one another");
+    } else {
+      const gap =
+        spec.scene.trackLength * 0.6 - a.radius - b.radius;
+      if (gap / closingSpeed > MAX_SIMULATED_SECONDS) {
+        errors.push(
+          `scene.objects: collision must occur within ${MAX_SIMULATED_SECONDS} s`,
+        );
+      }
+    }
+  }
+  if (
+    spec.scene.family === "orbit" &&
+    spec.scene.orbitalRadius <=
+      spec.scene.centralRadius + spec.scene.satellite.radius
+  ) {
+    errors.push("scene.orbitalRadius: satellite must begin outside the planet");
+  }
+  if (
+    (spec.scene.family === "pendulum" || spec.scene.family === "spring") &&
+    !spec.prediction.testChange
+  ) {
     errors.push(
-      "prediction.testChange: required for pendulum — declare the compared change (e.g. scene.bob.mass to a new value) instead of describing it only in prose",
+      `prediction.testChange: required for ${spec.scene.family} — declare the compared change instead of describing it only in prose`,
     );
   }
-  if (spec.scene.family !== "pendulum" && spec.prediction.testChange) {
+  if (
+    spec.scene.family !== "pendulum" &&
+    spec.scene.family !== "spring" &&
+    spec.prediction.testChange
+  ) {
     errors.push(
-      "prediction.testChange: base drop/projectile predictions must describe the rendered base scene",
+      "prediction.testChange: base drop/projectile/collision/orbit predictions must describe the rendered base scene",
     );
   }
   return errors;
@@ -290,7 +332,8 @@ function checkOutcomesComputable(spec: ExperimentSpec): string[] {
   const errors: string[] = [];
   if (
     expectedOutcomeKey(spec.scene, spec.prediction.testChange) === null &&
-    spec.scene.family !== "pendulum" // pendulum is reported by family checks
+    spec.scene.family !== "pendulum" &&
+    spec.scene.family !== "spring" // comparison families are reported by family checks
   ) {
     errors.push("prediction: outcome is not computable for the base scene");
   }
@@ -321,10 +364,14 @@ export function validateRendererExperimentSpec(input: unknown): ValidationResult
   errors.push(...checkPrediction(spec, spec.prediction, "prediction"));
   errors.push(...checkCounterfactuals(spec));
 
-  if (sceneDuration(spec.scene) === null) {
-    errors.push(
-      `scene: the experiment does not finish within ${MAX_SIMULATED_SECONDS} s of simulated time`,
-    );
+  try {
+    if (sceneDuration(spec.scene) === null) {
+      errors.push(
+        `scene: the experiment does not finish within ${MAX_SIMULATED_SECONDS} s of simulated time`,
+      );
+    }
+  } catch {
+    errors.push("scene: the experiment is not physically runnable");
   }
 
   if (errors.length === 0) {

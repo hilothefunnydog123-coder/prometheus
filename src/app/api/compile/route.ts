@@ -270,7 +270,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       return errorResponse(
         422,
         "unsupported_material",
-        "This material is not supported yet. Counterfactual Lab covers three experiment families: drop (free fall), projectile motion, and pendulum. Try a question about one of those.",
+        "This material is not supported yet. Counterfactual Lab supports drop, projectile, pendulum, spring, collision, and orbital-motion experiments. Try a question about one of those.",
       );
     }
     const response = await compileExperiment(

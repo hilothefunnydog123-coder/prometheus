@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  collisionDemo,
   dropDemo,
+  orbitDemo,
   pendulumDemo,
   projectileDemo,
+  springDemo,
 } from "@/components/lab/demo-experiments";
 import {
   MAX_SIMULATED_SECONDS,
@@ -36,7 +39,14 @@ describe("AI deterministic physics boundary", () => {
   });
 
   it("supports contract-valid scenes up to the solver safeguard", () => {
-    for (const fixture of [dropDemo, projectileDemo, pendulumDemo]) {
+    for (const fixture of [
+      dropDemo,
+      projectileDemo,
+      pendulumDemo,
+      springDemo,
+      collisionDemo,
+      orbitDemo,
+    ]) {
       const duration = sceneDuration(fixture.scene);
       expect(duration).not.toBeNull();
       expect(duration).toBeGreaterThan(0);

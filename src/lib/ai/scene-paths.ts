@@ -53,6 +53,32 @@ export const SCENE_PATH_BOUNDS: Record<
     "scene.bob.radius": BODY_BOUNDS.radius,
     "scene.bob.dragCoefficient": BODY_BOUNDS.dragCoefficient,
   },
+  spring: {
+    "scene.springConstant": { min: 1, max: 200 },
+    "scene.damping": { min: 0, max: 12 },
+    "scene.amplitude": { min: 0.1, max: 4 },
+    "scene.restLength": { min: 1, max: 6 },
+    "scene.body.mass": BODY_BOUNDS.mass,
+    "scene.body.radius": BODY_BOUNDS.radius,
+  },
+  collision: {
+    "scene.trackLength": { min: 8, max: 30 },
+    "scene.restitution": { min: 0, max: 1 },
+    "scene.objects.0.mass": BODY_BOUNDS.mass,
+    "scene.objects.1.mass": BODY_BOUNDS.mass,
+    "scene.objects.0.radius": BODY_BOUNDS.radius,
+    "scene.objects.1.radius": BODY_BOUNDS.radius,
+    "scene.objects.0.initialVelocity": { min: -15, max: 15 },
+    "scene.objects.1.initialVelocity": { min: -15, max: 15 },
+  },
+  orbit: {
+    "scene.gravitationalParameter": { min: 2, max: 80 },
+    "scene.centralRadius": { min: 0.5, max: 2.5 },
+    "scene.orbitalRadius": { min: 2, max: 14 },
+    "scene.initialSpeed": { min: 0.2, max: 10 },
+    "scene.satellite.mass": BODY_BOUNDS.mass,
+    "scene.satellite.radius": BODY_BOUNDS.radius,
+  },
 };
 
 export function isAllowlistedPath(

@@ -1,10 +1,13 @@
 import {
   sceneSchema,
+  type CollisionScene,
   type CounterfactualSpec,
   type ExperimentSpec,
+  type OrbitScene,
   type PendulumScene,
   type ProjectileScene,
   type SceneSpec,
+  type SpringScene,
 } from "@/lib/contracts/experiment";
 
 export type EvidencePoint = {
@@ -35,6 +38,8 @@ export type ProjectileMetrics = {
 export const DROP_TIE_TOLERANCE_SECONDS = 1 / 30;
 export const PROJECTILE_TARGET_RADIUS_METERS = 0.92;
 export const PENDULUM_PERIOD_RELATIVE_TOLERANCE = 0.01;
+export const SPRING_PERIOD_RELATIVE_TOLERANCE = 0.01;
+export const COLLISION_SPEED_TOLERANCE = 0.05;
 export const PROJECTILE_AIR_DENSITY_KG_PER_CUBIC_METER = 1.225;
 
 const MAX_PROJECTILE_STEPS = 1_000_000;
@@ -701,6 +706,339 @@ function pendulumEvidencePoints(
   });
 }
 
+export function springPeriod(scene: SpringScene): number | null {
+  assertValidScene(scene);
+  const naturalFrequencySquared =
+    scene.springConstant / scene.body.mass;
+  const decayRate = scene.damping / (2 * scene.body.mass);
+  const dampedFrequencySquared =
+    naturalFrequencySquared - decayRate * decayRate;
+  if (dampedFrequencySquared <= 0) return null;
+  return (2 * Math.PI) / Math.sqrt(dampedFrequencySquared);
+}
+
+export function classifySpringPeriods(
+  referencePeriod: number | null,
+  evaluatedPeriod: number | null,
+) {
+  return classifyPendulumPeriods(referencePeriod, evaluatedPeriod);
+}
+
+function springStateAtTime(scene: SpringScene, time: number) {
+  const mass = scene.body.mass;
+  const omegaSquared = scene.springConstant / mass;
+  const decayRate = scene.damping / (2 * mass);
+  const discriminant = omegaSquared - decayRate * decayRate;
+  const amplitude = scene.amplitude;
+
+  if (Math.abs(discriminant) < 1e-10) {
+    const exponential = Math.exp(-decayRate * time);
+    return {
+      displacement: amplitude * (1 + decayRate * time) * exponential,
+      velocity:
+        -amplitude * decayRate * decayRate * time * exponential,
+    };
+  }
+  if (discriminant > 0) {
+    const dampedFrequency = Math.sqrt(discriminant);
+    const exponential = Math.exp(-decayRate * time);
+    return {
+      displacement:
+        amplitude *
+        exponential *
+        (Math.cos(dampedFrequency * time) +
+          (decayRate / dampedFrequency) *
+            Math.sin(dampedFrequency * time)),
+      velocity:
+        -amplitude *
+        exponential *
+        (omegaSquared / dampedFrequency) *
+        Math.sin(dampedFrequency * time),
+    };
+  }
+
+  const root = Math.sqrt(-discriminant);
+  const firstRate = -decayRate + root;
+  const secondRate = -decayRate - root;
+  const firstCoefficient =
+    (-amplitude * secondRate) / (firstRate - secondRate);
+  const secondCoefficient =
+    (amplitude * firstRate) / (firstRate - secondRate);
+  return {
+    displacement:
+      firstCoefficient * Math.exp(firstRate * time) +
+      secondCoefficient * Math.exp(secondRate * time),
+    velocity:
+      firstCoefficient * firstRate * Math.exp(firstRate * time) +
+      secondCoefficient * secondRate * Math.exp(secondRate * time),
+  };
+}
+
+function springEvidencePoints(
+  scene: SpringScene,
+  duration: number,
+  sampleCount: number,
+) {
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const time =
+      sampleCount === 1 ? 0 : (duration * index) / (sampleCount - 1);
+    const state = springStateAtTime(scene, time);
+    const kinetic =
+      0.5 * scene.body.mass * state.velocity * state.velocity;
+    const potential =
+      0.5 * scene.springConstant * state.displacement * state.displacement;
+    return {
+      time,
+      primary: state.displacement,
+      secondary: state.velocity,
+      tertiary: kinetic + potential,
+    };
+  });
+}
+
+export type CollisionMetrics = {
+  collisionTime: number;
+  initialPositionA: number;
+  initialPositionB: number;
+  finalVelocityA: number;
+  finalVelocityB: number;
+  initialMomentum: number;
+  finalMomentum: number;
+};
+
+export function collisionMetrics(scene: CollisionScene): CollisionMetrics {
+  assertValidScene(scene);
+  const [a, b] = scene.objects;
+  const initialPositionA = -scene.trackLength * 0.3;
+  const initialPositionB = scene.trackLength * 0.3;
+  const relativeVelocity = a.initialVelocity - b.initialVelocity;
+  if (relativeVelocity <= 0) {
+    throw new RangeError("collision objects must be moving toward one another");
+  }
+  const initialGap =
+    initialPositionB - initialPositionA - a.radius - b.radius;
+  const collisionTime = initialGap / relativeVelocity;
+  if (!Number.isFinite(collisionTime) || collisionTime < 0) {
+    throw new RangeError("collision time is not finite");
+  }
+  const totalMass = a.mass + b.mass;
+  const relative = a.initialVelocity - b.initialVelocity;
+  const initialMomentum =
+    a.mass * a.initialVelocity + b.mass * b.initialVelocity;
+  const finalVelocityA =
+    (initialMomentum - b.mass * scene.restitution * relative) / totalMass;
+  const finalVelocityB =
+    (initialMomentum + a.mass * scene.restitution * relative) / totalMass;
+  const finalMomentum =
+    a.mass * finalVelocityA + b.mass * finalVelocityB;
+  return {
+    collisionTime,
+    initialPositionA,
+    initialPositionB,
+    finalVelocityA,
+    finalVelocityB,
+    initialMomentum,
+    finalMomentum,
+  };
+}
+
+export function classifyCollisionSpeeds(
+  speedA: number,
+  speedB: number,
+) {
+  assertNonNegative("object A speed", speedA);
+  assertNonNegative("object B speed", speedB);
+  if (
+    withinInclusiveThreshold(
+      Math.abs(speedA - speedB),
+      COLLISION_SPEED_TOLERANCE,
+      Math.max(speedA, speedB),
+    )
+  ) {
+    return "same_speed";
+  }
+  return speedA > speedB ? "object_a_faster" : "object_b_faster";
+}
+
+function collisionEvidencePoints(
+  scene: CollisionScene,
+  metrics: CollisionMetrics,
+  duration: number,
+  sampleCount: number,
+) {
+  const [a, b] = scene.objects;
+  const impactPositionA =
+    metrics.initialPositionA + a.initialVelocity * metrics.collisionTime;
+  const impactPositionB =
+    metrics.initialPositionB + b.initialVelocity * metrics.collisionTime;
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const time =
+      sampleCount === 1 ? 0 : (duration * index) / (sampleCount - 1);
+    const beforeImpact = time <= metrics.collisionTime;
+    const postTime = Math.max(0, time - metrics.collisionTime);
+    return {
+      time,
+      primary: beforeImpact
+        ? metrics.initialPositionA + a.initialVelocity * time
+        : impactPositionA + metrics.finalVelocityA * postTime,
+      secondary: beforeImpact
+        ? metrics.initialPositionB + b.initialVelocity * time
+        : impactPositionB + metrics.finalVelocityB * postTime,
+      primaryVelocity: beforeImpact
+        ? a.initialVelocity
+        : metrics.finalVelocityA,
+      secondaryVelocity: beforeImpact
+        ? b.initialVelocity
+        : metrics.finalVelocityB,
+    };
+  });
+}
+
+export type OrbitMetrics = {
+  outcomeKey: "stable_orbit" | "escape" | "impact";
+  circularSpeed: number;
+  escapeSpeed: number;
+  specificEnergy: number;
+  eccentricity: number;
+  periapsis: number;
+  observationDuration: number;
+};
+
+export function orbitMetrics(scene: OrbitScene): OrbitMetrics {
+  assertValidScene(scene);
+  const radius = scene.orbitalRadius;
+  const contactRadius = scene.centralRadius + scene.satellite.radius;
+  if (radius <= contactRadius) {
+    throw new RangeError("satellite must begin outside the central body");
+  }
+  const mu = scene.gravitationalParameter;
+  const speed = scene.initialSpeed;
+  const circularSpeed = Math.sqrt(mu / radius);
+  const escapeSpeed = Math.sqrt((2 * mu) / radius);
+  const specificEnergy = 0.5 * speed * speed - mu / radius;
+  const eccentricity = Math.abs((radius * speed * speed) / mu - 1);
+  const semiMajorAxis =
+    specificEnergy < 0 ? -mu / (2 * specificEnergy) : Number.POSITIVE_INFINITY;
+  const periapsis =
+    specificEnergy < 0
+      ? semiMajorAxis * (1 - eccentricity)
+      : radius;
+  const outcomeKey =
+    specificEnergy >= 0
+      ? "escape"
+      : periapsis <= contactRadius
+        ? "impact"
+        : "stable_orbit";
+  const orbitalPeriod =
+    Number.isFinite(semiMajorAxis) && semiMajorAxis > 0
+      ? 2 * Math.PI * Math.sqrt((semiMajorAxis ** 3) / mu)
+      : 12;
+  return {
+    outcomeKey,
+    circularSpeed,
+    escapeSpeed,
+    specificEnergy,
+    eccentricity,
+    periapsis,
+    observationDuration: Math.min(Math.max(orbitalPeriod, 4), 12),
+  };
+}
+
+type OrbitState = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+};
+
+function orbitDerivative(state: OrbitState, mu: number) {
+  const radius = Math.hypot(state.x, state.y);
+  const inverseRadiusCubed = 1 / Math.max(radius ** 3, 1e-9);
+  return {
+    x: state.vx,
+    y: state.vy,
+    vx: -mu * state.x * inverseRadiusCubed,
+    vy: -mu * state.y * inverseRadiusCubed,
+  };
+}
+
+function advanceOrbit(state: OrbitState, step: number, mu: number): OrbitState {
+  const add = (
+    source: OrbitState,
+    derivative: ReturnType<typeof orbitDerivative>,
+    scale: number,
+  ): OrbitState => ({
+    x: source.x + derivative.x * scale,
+    y: source.y + derivative.y * scale,
+    vx: source.vx + derivative.vx * scale,
+    vy: source.vy + derivative.vy * scale,
+  });
+  const k1 = orbitDerivative(state, mu);
+  const k2 = orbitDerivative(add(state, k1, step / 2), mu);
+  const k3 = orbitDerivative(add(state, k2, step / 2), mu);
+  const k4 = orbitDerivative(add(state, k3, step), mu);
+  const next = {
+    x: state.x + (step * (k1.x + 2 * k2.x + 2 * k3.x + k4.x)) / 6,
+    y: state.y + (step * (k1.y + 2 * k2.y + 2 * k3.y + k4.y)) / 6,
+    vx: state.vx + (step * (k1.vx + 2 * k2.vx + 2 * k3.vx + k4.vx)) / 6,
+    vy: state.vy + (step * (k1.vy + 2 * k2.vy + 2 * k3.vy + k4.vy)) / 6,
+  };
+  if (Object.values(next).some((value) => !Number.isFinite(value))) {
+    throw new RangeError("orbital integration diverged");
+  }
+  return next;
+}
+
+function orbitEvidencePoints(
+  scene: OrbitScene,
+  duration: number,
+  sampleCount: number,
+) {
+  let state: OrbitState = {
+    x: scene.orbitalRadius,
+    y: 0,
+    vx: 0,
+    vy: scene.initialSpeed,
+  };
+  let time = 0;
+  const contactRadius = scene.centralRadius + scene.satellite.radius;
+  let impacted = false;
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const targetTime =
+      sampleCount === 1 ? 0 : (duration * index) / (sampleCount - 1);
+    while (time < targetTime && !impacted) {
+      const step = Math.min(MAX_INTEGRATION_STEP_SECONDS, targetTime - time);
+      const next = advanceOrbit(
+        state,
+        step,
+        scene.gravitationalParameter,
+      );
+      if (Math.hypot(next.x, next.y) <= contactRadius) {
+        const angle = Math.atan2(next.y, next.x);
+        state = {
+          x: Math.cos(angle) * contactRadius,
+          y: Math.sin(angle) * contactRadius,
+          vx: 0,
+          vy: 0,
+        };
+        impacted = true;
+      } else {
+        state = next;
+      }
+      time += step;
+    }
+    const radius = Math.hypot(state.x, state.y);
+    const speed = Math.hypot(state.vx, state.vy);
+    return {
+      time: targetTime,
+      primary: state.x,
+      secondary: state.y,
+      tertiary: radius,
+      primaryVelocity: speed,
+    };
+  });
+}
+
 export function determineOutcome(
   scene: SceneSpec,
   referenceScene?: SceneSpec,
@@ -731,6 +1069,30 @@ export function determineOutcome(
     const { range } = projectileMetrics(scene);
     const target = scene.targetDistance ?? range;
     return classifyProjectileRange(range, target);
+  }
+
+  if (scene.family === "collision") {
+    const metrics = collisionMetrics(scene);
+    return classifyCollisionSpeeds(
+      Math.abs(metrics.finalVelocityA),
+      Math.abs(metrics.finalVelocityB),
+    );
+  }
+
+  if (scene.family === "orbit") {
+    return orbitMetrics(scene).outcomeKey;
+  }
+
+  if (scene.family === "spring") {
+    if (referenceScene === undefined) return "period_unchanged";
+    assertValidScene(referenceScene);
+    if (referenceScene.family !== "spring") {
+      throw new TypeError("spring outcomes require a spring reference scene");
+    }
+    return classifySpringPeriods(
+      springPeriod(referenceScene),
+      springPeriod(scene),
+    );
   }
 
   if (referenceScene === undefined) return "period_unchanged";
@@ -944,6 +1306,97 @@ export function buildEvidence(spec: ExperimentSpec): SimulationEvidence {
         value: `${solution.apex.toFixed(1)} m`,
       },
       points: solution.points,
+    };
+  }
+
+  if (scene.family === "spring") {
+    const calculatedPeriod = springPeriod(scene);
+    const naturalPeriod =
+      2 * Math.PI * Math.sqrt(scene.body.mass / scene.springConstant);
+    const duration = Math.min((calculatedPeriod ?? naturalPeriod) * 2.2, 10);
+    const comparison = comparisonForEvidence(spec);
+    const outcomeKey = comparison
+      ? determineOutcome(comparison.evaluated, comparison.reference)
+      : "period_unchanged";
+    return {
+      outcomeKey,
+      duration,
+      summary:
+        calculatedPeriod === null
+          ? "Damping is critical or stronger, so the mass returns to equilibrium without repeating. Spring potential energy and kinetic energy are dissipated into the damper."
+          : scene.damping > 0
+            ? "The restoring force follows Hooke's law while inertia sets the response. Damping steadily removes mechanical energy without changing the equilibrium position."
+            : "Hooke's law trades spring potential energy with kinetic energy. Mass and stiffness set the period while total mechanical energy remains constant.",
+      metricA: {
+        label: "Calculated period",
+        value:
+          calculatedPeriod === null
+            ? "No oscillation"
+            : `${calculatedPeriod.toFixed(2)} s`,
+      },
+      metricB: {
+        label: "Natural frequency",
+        value: `${(1 / naturalPeriod).toFixed(2)} Hz`,
+      },
+      points: springEvidencePoints(scene, duration, 56),
+    };
+  }
+
+  if (scene.family === "collision") {
+    const metrics = collisionMetrics(scene);
+    const duration = Math.min(metrics.collisionTime + 2.2, 10);
+    const momentumDrift = Math.abs(
+      metrics.finalMomentum - metrics.initialMomentum,
+    );
+    return {
+      outcomeKey: classifyCollisionSpeeds(
+        Math.abs(metrics.finalVelocityA),
+        Math.abs(metrics.finalVelocityB),
+      ),
+      duration,
+      summary:
+        scene.restitution > 0.98
+          ? "Total momentum and relative speed are conserved in this elastic collision. The masses determine how the incoming momentum is redistributed."
+          : "Total momentum is conserved while the restitution coefficient controls how much relative speed and kinetic energy remain after impact.",
+      metricA: {
+        label: "Orange final velocity",
+        value: `${metrics.finalVelocityA.toFixed(2)} m/s`,
+      },
+      metricB: {
+        label: "Blue final velocity",
+        value: `${metrics.finalVelocityB.toFixed(2)} m/s`,
+      },
+      points: collisionEvidencePoints(scene, metrics, duration, 58),
+      ...(momentumDrift > 1e-9
+        ? { summary: "The collision calculation exceeded its momentum tolerance." }
+        : {}),
+    };
+  }
+
+  if (scene.family === "orbit") {
+    const metrics = orbitMetrics(scene);
+    return {
+      outcomeKey: metrics.outcomeKey,
+      duration: metrics.observationDuration,
+      summary:
+        metrics.outcomeKey === "escape"
+          ? "The satellite's specific orbital energy is non-negative, so gravity bends the path but cannot keep it bound."
+          : metrics.outcomeKey === "impact"
+            ? "The bound trajectory's periapsis intersects the central body, so continuous free fall ends in impact."
+            : "Gravity continuously turns the satellite's tangential velocity, producing a bound Keplerian orbit instead of force-free straight-line motion.",
+      metricA: {
+        label: "Orbit eccentricity",
+        value: metrics.eccentricity.toFixed(3),
+      },
+      metricB: {
+        label: "Escape speed here",
+        value: `${metrics.escapeSpeed.toFixed(2)} m/s`,
+      },
+      points: orbitEvidencePoints(
+        scene,
+        metrics.observationDuration,
+        72,
+      ),
     };
   }
 

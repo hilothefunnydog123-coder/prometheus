@@ -26,6 +26,13 @@ const QUESTION_STOP_WORDS = new Set([
   "objects",
   "pendulum",
   "projectile",
+  "spring",
+  "collision",
+  "momentum",
+  "orbit",
+  "orbital",
+  "satellite",
+  "planet",
   "photo",
   "please",
   "show",
@@ -163,6 +170,46 @@ export function questionAlignmentErrors(
     } else if (!hasChangePath(spec, "scene.length")) {
       errors.push(
         "pendulum-length questions must expose or change string length",
+      );
+    }
+  }
+
+  if (/\b(?:spring|hooke|oscillator|resonance)\b/.test(question)) {
+    if (spec.scene.family !== "spring") {
+      errors.push("spring-oscillation questions require a spring scene");
+    } else if (
+      !hasChangePath(spec, "scene.springConstant") &&
+      !hasChangePath(spec, "scene.body.mass") &&
+      !hasChangePath(spec, "scene.damping")
+    ) {
+      errors.push(
+        "spring questions must expose or change stiffness, mass, or damping",
+      );
+    }
+  }
+
+  if (/\b(?:collision|momentum|restitution|elastic|inelastic)\b/.test(question)) {
+    if (spec.scene.family !== "collision") {
+      errors.push("collision and momentum questions require a collision scene");
+    } else if (
+      !spec.measurements.some((measurement) =>
+        /position|speed|velocity|momentum/i.test(measurement.label),
+      )
+    ) {
+      errors.push("collision experiments must measure position, velocity, or momentum");
+    }
+  }
+
+  if (/\b(?:orbit|orbital|satellite|escape velocity|kepler)\b/.test(question)) {
+    if (spec.scene.family !== "orbit") {
+      errors.push("orbital-motion questions require an orbit scene");
+    } else if (
+      !hasChangePath(spec, "scene.initialSpeed") &&
+      !hasChangePath(spec, "scene.orbitalRadius") &&
+      !hasChangePath(spec, "scene.gravitationalParameter")
+    ) {
+      errors.push(
+        "orbital questions must expose or change speed, radius, or gravity strength",
       );
     }
   }

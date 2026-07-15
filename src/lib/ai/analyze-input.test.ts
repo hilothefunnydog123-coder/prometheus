@@ -42,6 +42,9 @@ describe("heuristicIntent", () => {
       "Why does changing a metronome's string length change its timing?",
       "pendulum",
     ],
+    ["How does a spring constant change resonance frequency?", "spring"],
+    ["How is momentum shared in an elastic collision?", "collision"],
+    ["What speed keeps a satellite in a circular orbit?", "orbit"],
   ] as const)("routes an original mechanics question: %s", (question, family) => {
     expect(heuristicIntent(question, false).family).toBe(family);
   });

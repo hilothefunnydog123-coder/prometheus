@@ -1,10 +1,13 @@
 import {
   sceneSchema,
+  type CollisionScene,
   type DropScene,
   type ExperimentSpec,
+  type OrbitScene,
   type PendulumScene,
   type ProjectileScene,
   type SceneSpec,
+  type SpringScene,
 } from "@/lib/contracts/experiment";
 import {
   DROP_TIE_TOLERANCE_SECONDS,
@@ -12,10 +15,13 @@ import {
   PENDULUM_PERIOD_RELATIVE_TOLERANCE,
   PROJECTILE_AIR_DENSITY_KG_PER_CUBIC_METER,
   PROJECTILE_TARGET_RADIUS_METERS,
+  collisionMetrics,
   determineOutcome,
+  orbitMetrics,
   pendulumPeriod,
   projectileMetrics,
   quadraticDragDropTime,
+  springPeriod,
   undampedPendulumPeriod,
 } from "./evidence";
 
@@ -33,6 +39,9 @@ export const OUTCOME_KEYS = {
   drop: ["object_a_first", "object_b_first", "tie"],
   projectile: ["undershoot", "hit", "overshoot"],
   pendulum: ["period_increases", "period_decreases", "period_unchanged"],
+  spring: ["period_increases", "period_decreases", "period_unchanged"],
+  collision: ["object_a_faster", "object_b_faster", "same_speed"],
+  orbit: ["stable_orbit", "escape", "impact"],
 } as const;
 
 export const MAX_SIMULATED_SECONDS = MAX_SIMULATION_TIME_SECONDS;
@@ -46,6 +55,9 @@ export const PROJECTILE_AIR_DENSITY =
 export type DropOutcome = (typeof OUTCOME_KEYS.drop)[number];
 export type ProjectileOutcome = (typeof OUTCOME_KEYS.projectile)[number];
 export type PendulumOutcome = (typeof OUTCOME_KEYS.pendulum)[number];
+export type SpringOutcome = (typeof OUTCOME_KEYS.spring)[number];
+export type CollisionOutcome = (typeof OUTCOME_KEYS.collision)[number];
+export type OrbitOutcome = (typeof OUTCOME_KEYS.orbit)[number];
 
 export interface SceneChange {
   targetPath: string;
@@ -185,15 +197,32 @@ export function pendulumComparisonOutcome(
   return determineOutcome(after, before) as PendulumOutcome;
 }
 
+export function springComparisonOutcome(
+  before: SpringScene,
+  after: SpringScene,
+): SpringOutcome {
+  return determineOutcome(after, before) as SpringOutcome;
+}
+
+export function collisionOutcome(scene: CollisionScene): CollisionOutcome {
+  return determineOutcome(scene) as CollisionOutcome;
+}
+
+export function orbitOutcome(scene: OrbitScene): OrbitOutcome {
+  return determineOutcome(scene) as OrbitOutcome;
+}
+
 /** Compute a prediction key from numeric scene data, never prompt wording. */
 export function expectedOutcomeKey(
   scene: SceneSpec,
   change?: SceneChange,
 ): string | null {
-  if (scene.family === "pendulum") {
+  if (scene.family === "pendulum" || scene.family === "spring") {
     if (!change) return null;
     const after = applySceneChange(scene, change.targetPath, change.value);
-    return pendulumComparisonOutcome(scene, after as PendulumScene);
+    return scene.family === "pendulum"
+      ? pendulumComparisonOutcome(scene, after as PendulumScene)
+      : springComparisonOutcome(scene, after as SpringScene);
   }
 
   const observed = change
@@ -201,6 +230,8 @@ export function expectedOutcomeKey(
     : scene;
   if (observed.family === "drop") return dropOutcome(observed);
   if (observed.family === "projectile") return projectileOutcome(observed);
+  if (observed.family === "collision") return collisionOutcome(observed);
+  if (observed.family === "orbit") return orbitOutcome(observed);
   return null;
 }
 
@@ -215,7 +246,7 @@ export function sceneDuration(scene: SceneSpec): number | null {
     );
   } else if (scene.family === "projectile") {
     duration = projectileFlight(scene).flightTime;
-  } else {
+  } else if (scene.family === "pendulum") {
     const repeatingPeriod = pendulumPeriod(scene);
     const referencePeriod =
       repeatingPeriod ??
@@ -225,6 +256,15 @@ export function sceneDuration(scene: SceneSpec): number | null {
         scene.releaseAngleDegrees,
       );
     duration = 2 * referencePeriod;
+  } else if (scene.family === "spring") {
+    const repeatingPeriod = springPeriod(scene);
+    const naturalPeriod =
+      2 * Math.PI * Math.sqrt(scene.body.mass / scene.springConstant);
+    duration = 2 * (repeatingPeriod ?? naturalPeriod);
+  } else if (scene.family === "collision") {
+    duration = collisionMetrics(scene).collisionTime + 2.2;
+  } else {
+    duration = orbitMetrics(scene).observationDuration;
   }
   return duration <= MAX_SIMULATED_SECONDS ? duration : null;
 }
@@ -257,7 +297,12 @@ export function finalizeCorrectness(spec: ExperimentSpec): ExperimentSpec {
             finalized.scene,
             changedScene as PendulumScene,
           )
-        : expectedOutcomeKey(changedScene);
+        : finalized.scene.family === "spring"
+          ? springComparisonOutcome(
+              finalized.scene,
+              changedScene as SpringScene,
+            )
+          : expectedOutcomeKey(changedScene);
     if (key === null) {
       throw new Error(
         `counterfactual "${counterfactual.id}" outcome is not computable`,

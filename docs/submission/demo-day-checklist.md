@@ -121,4 +121,4 @@ or deployed commit.
 - [ ] One typed-question compile (if provider configured) returns an
       experiment or a *disclosed* fallback — either is demoable
 - [ ] Off-topic question ("balance chemical equations") returns the polite
-      422 message naming the three families
+      422 message naming the six families

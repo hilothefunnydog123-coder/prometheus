@@ -95,7 +95,11 @@ function tokenize(intent: LearningIntent): string[] {
  *    fixture declaration order (drop first).
  */
 export function closestFixture(intent: LearningIntent): Fixture {
-  if (intent.family !== "unknown") {
+  if (
+    intent.family === "drop" ||
+    intent.family === "projectile" ||
+    intent.family === "pendulum"
+  ) {
     return getFixtureByFamily(intent.family);
   }
   const tokens = tokenize(intent);

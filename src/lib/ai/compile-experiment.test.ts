@@ -44,6 +44,7 @@ const modelSpec = (() => {
 
 const invalidSpec = (() => {
   const spec = structuredClone(modelSpec);
+  if (spec.scene.family !== "drop") throw new Error("expected drop fixture");
   spec.scene.gravity = 500; // out of contract bounds
   return spec;
 })();

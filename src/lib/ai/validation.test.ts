@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ExperimentSpec } from "@/lib/contracts/experiment";
 import {
+  collisionDemo as collisionFixture,
   dropDemo as dropFixture,
+  orbitDemo as orbitFixture,
   pendulumDemo as pendulumFixture,
   projectileDemo as projectileFixture,
+  springDemo as springFixture,
 } from "@/components/lab/demo-experiments";
 import { validateExperimentSpec } from "./validation";
 
@@ -29,7 +32,14 @@ function expectErrors(input: unknown, fragment: string): void {
 
 describe("validateExperimentSpec", () => {
   it("accepts the golden fixtures unchanged", () => {
-    for (const fixture of [dropFixture, projectileFixture, pendulumFixture]) {
+    for (const fixture of [
+      dropFixture,
+      projectileFixture,
+      pendulumFixture,
+      springFixture,
+      collisionFixture,
+      orbitFixture,
+    ]) {
       const result = validateExperimentSpec(fixture);
       expect(result.ok, JSON.stringify(result)).toBe(true);
       if (result.ok) expect(result.spec).toEqual(fixture);
@@ -51,6 +61,7 @@ describe("validateExperimentSpec", () => {
     expect(validateExperimentSpec(null).ok).toBe(false);
     expectErrors(
       specWith(dropFixture, (s) => {
+        if (s.scene.family !== "drop") throw new Error("expected drop fixture");
         s.scene.gravity = 100; // schema bound is 25
       }),
       "scene.gravity",
@@ -182,6 +193,34 @@ describe("validateExperimentSpec", () => {
         delete s.prediction.testChange;
       }),
       "prediction.testChange",
+    );
+  });
+
+  it("enforces physically runnable spring, collision, and orbit scenes", () => {
+    expectErrors(
+      specWith(springFixture, (s) => {
+        delete s.prediction.testChange;
+      }),
+      "prediction.testChange",
+    );
+    expectErrors(
+      specWith(collisionFixture, (s) => {
+        if (s.scene.family !== "collision") throw new Error("collision fixture");
+        s.scene.objects[0].initialVelocity = -1;
+        s.scene.objects[1].initialVelocity = 1;
+        s.controls = [];
+      }),
+      "move toward",
+    );
+    expectErrors(
+      specWith(orbitFixture, (s) => {
+        if (s.scene.family !== "orbit") throw new Error("orbit fixture");
+        s.scene.orbitalRadius = 2;
+        s.scene.centralRadius = 2;
+        s.scene.satellite.radius = 0.5;
+        s.controls = [];
+      }),
+      "outside the planet",
     );
   });
 

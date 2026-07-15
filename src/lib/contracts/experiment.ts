@@ -42,10 +42,42 @@ export const pendulumSceneSchema = z.object({
   bob: bodySchema,
 });
 
+export const springSceneSchema = z.object({
+  family: z.literal("spring"),
+  springConstant: boundedNumber(1, 200),
+  damping: boundedNumber(0, 12),
+  amplitude: boundedNumber(0.1, 4),
+  restLength: boundedNumber(1, 6),
+  body: bodySchema,
+});
+
+const collisionBodySchema = bodySchema.extend({
+  initialVelocity: boundedNumber(-15, 15),
+});
+
+export const collisionSceneSchema = z.object({
+  family: z.literal("collision"),
+  trackLength: boundedNumber(8, 30),
+  restitution: boundedNumber(0, 1),
+  objects: z.tuple([collisionBodySchema, collisionBodySchema]),
+});
+
+export const orbitSceneSchema = z.object({
+  family: z.literal("orbit"),
+  gravitationalParameter: boundedNumber(2, 80),
+  centralRadius: boundedNumber(0.5, 2.5),
+  orbitalRadius: boundedNumber(2, 14),
+  initialSpeed: boundedNumber(0.2, 10),
+  satellite: bodySchema,
+});
+
 export const sceneSchema = z.discriminatedUnion("family", [
   dropSceneSchema,
   projectileSceneSchema,
   pendulumSceneSchema,
+  springSceneSchema,
+  collisionSceneSchema,
+  orbitSceneSchema,
 ]);
 
 export const controlSchema = z.object({
@@ -129,6 +161,9 @@ export type GradeBand = z.infer<typeof gradeBandSchema>;
 export type DropScene = z.infer<typeof dropSceneSchema>;
 export type ProjectileScene = z.infer<typeof projectileSceneSchema>;
 export type PendulumScene = z.infer<typeof pendulumSceneSchema>;
+export type SpringScene = z.infer<typeof springSceneSchema>;
+export type CollisionScene = z.infer<typeof collisionSceneSchema>;
+export type OrbitScene = z.infer<typeof orbitSceneSchema>;
 export type SceneSpec = z.infer<typeof sceneSchema>;
 export type ControlSpec = z.infer<typeof controlSchema>;
 export type MeasurementSpec = z.infer<typeof measurementSchema>;

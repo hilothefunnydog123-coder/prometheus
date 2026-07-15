@@ -40,9 +40,10 @@ changed world. A Bayesian mastery meter updates from what you demonstrated:
 in our demo run it drops from 25% to 18% after a wrong first prediction,
 then climbs to 58% after a correct transfer test.
 
-Three families ship today — free-fall drops, projectiles, and pendulums —
-each built around a documented misconception. Off-topic questions get an
-honest "not supported yet" instead of a fake simulation.
+Six families ship today — free-fall drops, projectiles, pendulums, spring
+oscillators, momentum collisions, and orbital motion — each built around a
+documented misconception. Off-topic questions get an honest "not supported
+yet" instead of a fake simulation.
 
 ## How we built it
 
@@ -59,8 +60,8 @@ offer. The UI leaves the custom question untouched and requires the learner to
 explicitly open that demo under its own canonical question. A deterministic physics module,
 shared by the renderer and the grader, computes every "correct" answer.
 Mastery is Bayesian Knowledge Tracing implemented as pure functions and
-persisted in the browser. 212 unit and API tests run with all provider calls
-mocked, plus four isolated Playwright end-to-end flows.
+persisted in the browser. 229 unit and API tests run with all provider calls
+mocked, plus seven isolated Playwright end-to-end flows.
 
 ## How AI/ML is used
 
@@ -144,7 +145,7 @@ vision models) · Vitest · Playwright
 | --- | --- |
 | Educational Impact — 25 points | Prediction-first misconception confrontation, synchronized evidence, explanation, transfer test, and BKT mastery address the difference between reading an answer and revising a mental model. |
 | Creative Use of AI/ML — 25 points | AI is core: text or diagram → question-aligned declarative experiment, then rubric feedback. Deterministic physics constrains rather than replaces the model's creative role. |
-| Technical Execution — 25 points | Strict API and schema validation, one repair, deterministic outcomes, explicit outage recovery, 212 mocked-provider tests, four Playwright flows, and a production build. |
+| Technical Execution — 25 points | Strict API and schema validation, one repair, deterministic outcomes, explicit outage recovery, 229 mocked-provider tests, seven Playwright flows, and a production build. |
 | Pitch & Demo — 25 points | A rehearsed 1:52 story reaches simulation before 30 seconds, shows a wrong prediction, evidence, explanation, one-variable counterfactual, and mastery change. |
 
 Full claim-by-claim evidence with file paths: `judge-evidence-map.md`.

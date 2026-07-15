@@ -7,7 +7,14 @@ import { z } from "zod";
  * carry executable code, markup, shader source, or file paths.
  */
 
-export const EXPERIMENT_FAMILIES = ["drop", "projectile", "pendulum"] as const;
+export const EXPERIMENT_FAMILIES = [
+  "drop",
+  "projectile",
+  "pendulum",
+  "spring",
+  "collision",
+  "orbit",
+] as const;
 export type ExperimentFamily = (typeof EXPERIMENT_FAMILIES)[number];
 
 const CONTROL_CHARS =

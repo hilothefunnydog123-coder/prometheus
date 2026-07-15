@@ -17,22 +17,29 @@ import {
 
 export function EvidenceChart({ spec, evidence }: { spec: ExperimentSpec; evidence: SimulationEvidence }) {
   const velocityFocusedDrop = isVelocityFocusedDrop(spec);
-  const labels =
-    spec.scene.family === "drop"
-      ? velocityFocusedDrop
-        ? ["Object A speed", "Object B speed"]
-        : ["Object A height", "Object B height"]
-      : spec.scene.family === "projectile"
-        ? ["Horizontal position", "Height"]
-        : ["Angle", "Speed"];
-  const units =
-    spec.scene.family === "drop"
-      ? velocityFocusedDrop
-        ? ["m/s", "m/s"]
-        : ["m", "m"]
-      : spec.scene.family === "projectile"
-        ? ["m", "m"]
-        : ["°", "m/s"];
+  let labels: [string, string];
+  let units: [string, string];
+  if (spec.scene.family === "drop") {
+    labels = velocityFocusedDrop
+      ? ["Object A speed", "Object B speed"]
+      : ["Object A height", "Object B height"];
+    units = velocityFocusedDrop ? ["m/s", "m/s"] : ["m", "m"];
+  } else if (spec.scene.family === "projectile") {
+    labels = ["Horizontal position", "Height"];
+    units = ["m", "m"];
+  } else if (spec.scene.family === "pendulum") {
+    labels = ["Angle", "Speed"];
+    units = ["°", "m/s"];
+  } else if (spec.scene.family === "spring") {
+    labels = ["Displacement", "Velocity"];
+    units = ["m", "m/s"];
+  } else if (spec.scene.family === "collision") {
+    labels = ["Object A position", "Object B position"];
+    units = ["m", "m"];
+  } else {
+    labels = ["Orbital x position", "Orbital y position"];
+    units = ["m", "m"];
+  }
   return (
     <div className="chart-wrap" aria-label={`Evidence chart showing ${labels.join(" and ")}`}>
       <ResponsiveContainer width="100%" height="100%">

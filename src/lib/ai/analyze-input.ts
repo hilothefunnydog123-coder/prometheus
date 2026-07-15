@@ -117,6 +117,51 @@ const FAMILY_KEYWORDS: ReadonlyArray<{
     ],
     concepts: ["pendulum-period", "oscillation"],
   },
+  {
+    family: "spring",
+    words: [
+      "spring",
+      "hooke",
+      "spring constant",
+      "resonance",
+      "mass-spring",
+      "harmonic oscillator",
+      "damping",
+      "stiffness",
+      "frequency",
+    ],
+    concepts: ["hookes-law", "harmonic-motion"],
+  },
+  {
+    family: "collision",
+    words: [
+      "collision",
+      "collide",
+      "momentum",
+      "elastic collision",
+      "inelastic collision",
+      "restitution",
+      "crash",
+      "billiard",
+      "impulse",
+    ],
+    concepts: ["momentum", "collisions"],
+  },
+  {
+    family: "orbit",
+    words: [
+      "orbit",
+      "orbital",
+      "satellite",
+      "planet",
+      "escape velocity",
+      "kepler",
+      "spacecraft",
+      "centripetal",
+      "continuous free fall",
+    ],
+    concepts: ["orbital-motion", "gravity"],
+  },
 ];
 
 function heuristicDifficulty(text: string): Difficulty {
