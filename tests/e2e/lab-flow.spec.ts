@@ -221,6 +221,17 @@ test("provider outage never relabels a question and requires explicit backup cho
     page.getByText("not generated for the prior question", { exact: false }),
   ).toBeVisible();
 
+  // The provenance disclosure must never be clipped mid-sentence: visibility
+  // alone does not catch CSS ellipsis/overflow truncation, so measure it.
+  const noticeClipping = await page
+    .locator(".compiler-notice")
+    .evaluate((el) => ({
+      horizontal: el.scrollWidth - el.clientWidth,
+      vertical: el.scrollHeight - el.clientHeight,
+    }));
+  expect(noticeClipping.horizontal).toBeLessThanOrEqual(1);
+  expect(noticeClipping.vertical).toBeLessThanOrEqual(1);
+
   await page
     .getByRole("button", { name: "A The 8 kg orange sphere" })
     .click();

@@ -2150,6 +2150,14 @@ button:disabled {
   margin: 0;
   color: #7f989f;
   font-size: 8px;
+  /* This is the provenance disclosure ("validated demo … not generated for
+     the prior question"). It must never be clipped mid-sentence: override
+     the earlier nowrap/ellipsis rule and let it wrap instead. */
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  text-align: right;
+  line-height: 1.5;
 }
 
 .compiler-notice svg {
