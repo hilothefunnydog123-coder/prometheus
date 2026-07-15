@@ -295,7 +295,10 @@ function SimulationTimer({
   }, [spec.id, spec.scene]);
   useFrame((_, delta) => {
     if (!active || completed.current) return;
-    elapsed.current += Math.min(delta, 0.05);
+    // Keep the experiment tied to real elapsed time on software-rendered or
+    // low-power GPUs. A small cap still prevents a long background-tab pause
+    // from instantly skipping the observation when the learner returns.
+    elapsed.current += Math.min(delta, 0.25);
     if (elapsed.current >= Math.min(evidence.duration + 0.5, 6.2)) {
       completed.current = true;
       onComplete(evidence);
