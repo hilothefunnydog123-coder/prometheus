@@ -38,4 +38,20 @@ The focused comparison confirms that prediction recap, observation, chart, valid
 
 No remaining P0, P1, or P2 issues were found.
 
+## Focused verification — progress rail connector
+
+- Source screenshot: `/var/folders/gt/580h0wx52v1147kb41bv7s4c0000gn/T/TemporaryItems/NSIRD_screencaptureui_HghnqS/Screenshot 2026-07-15 at 1.33.09 PM.png`
+- Implementation screenshot: `/tmp/prometheus-stepper-fixed.png`
+- Focused source: `/tmp/prometheus-stepper-reference-normalized.png`
+- Focused implementation: `/tmp/prometheus-stepper-fixed-crop.png`
+- Viewport: 1292 × 900
+- State: Galileo Drop, run 1 evidence captured; `Evidence` is the current progress step
+
+### Comparison history
+
+1. **P2 — The connector before “Change” crossed the “Evidence” label.** The fixed-width steps placed the following connector 11.45 px inside the preceding label; smaller collisions also affected “Predict” and “Change.” Replaced the fixed-width desktop rail with content-sized steps and dedicated connector gaps. Resolved.
+2. **Post-fix evidence.** Every desktop label has 5 px of clear space before the following connector at 1292 px and 4 px at 1200 px. At 900 px the compact icon-only rail has zero horizontal overflow. Resolved.
+
+Typography, colors, copy, and semantic state styling remain unchanged. Spacing now follows the intended circle → label → connector rhythm. No imagery or icon assets were affected, and the focused source/implementation comparison found no remaining P0, P1, or P2 mismatch related to this correction.
+
 final result: passed

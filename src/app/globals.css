@@ -3030,3 +3030,32 @@ button:disabled {
     display: none;
   }
 }
+
+/* Keep progress connectors inside dedicated gaps instead of letting them run
+   backward through the preceding label (most visibly, “Evidence”). */
+@media (min-width: 701px) {
+  .progress-rail {
+    gap: 28px;
+  }
+
+  .progress-rail > div {
+    min-width: max-content;
+    flex: 0 0 auto;
+  }
+
+  .progress-rail > div::before {
+    width: 18px;
+    left: -23px;
+  }
+}
+
+@media (min-width: 701px) and (max-width: 1260px) {
+  .progress-rail {
+    gap: 18px;
+  }
+
+  .progress-rail > div::before {
+    width: 10px;
+    left: -14px;
+  }
+}
