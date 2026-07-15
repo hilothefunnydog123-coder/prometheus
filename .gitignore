@@ -28,3 +28,7 @@ yarn-error.log*
 
 # local eval reports (opt-in script output)
 /eval-reports/
+
+# browser test artifacts
+/test-results/
+/playwright-report/
