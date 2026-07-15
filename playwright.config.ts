@@ -16,6 +16,12 @@ export default defineConfig({
     viewport: { width: 1440, height: 900 },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    // Sandboxes and CI images often preinstall a Chromium at a different
+    // revision than the pinned @playwright/test expects. Point this at that
+    // binary to run E2E without downloading browsers; unset = default.
+    launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+      ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }
+      : {},
   },
   webServer: {
     command: `npm run dev -- --port ${port}`,
