@@ -38,7 +38,7 @@ import {
  * - carry no executable code, markup, shader source, or file paths
  * - address only allowlisted scene paths from controls/changes/testChange
  * - change exactly one numeric property per counterfactual, staying in bounds
- * - complete within 20 s of simulated time in every world it describes
+ * - complete within the deterministic solver safeguard in every world it describes
  * - cover each family outcome key exactly once per prediction
  * - have correctOutcomeKey values computed by the server, not the model
  */
@@ -185,6 +185,9 @@ function checkControls(spec: ExperimentSpec): string[] {
     if (control.min >= control.max) {
       errors.push(`${label}: min must be less than max`);
     }
+    if (control.step > control.max - control.min) {
+      errors.push(`${label}: step must not exceed the control range`);
+    }
     if (control.min < bounds.min || control.max > bounds.max) {
       errors.push(
         `${label}: range [${control.min}, ${control.max}] exceeds contract bounds [${bounds.min}, ${bounds.max}] for ${control.targetPath}`,
@@ -192,6 +195,16 @@ function checkControls(spec: ExperimentSpec): string[] {
     }
     if (control.value < control.min || control.value > control.max) {
       errors.push(`${label}: value ${control.value} is outside its own range`);
+    } else {
+      const stepsFromMinimum = (control.value - control.min) / control.step;
+      if (
+        Math.abs(stepsFromMinimum - Math.round(stepsFromMinimum)) >
+        VALUE_EPSILON
+      ) {
+        errors.push(
+          `${label}: value ${control.value} is not aligned to step ${control.step} from min ${control.min}`,
+        );
+      }
     }
     const current = getSceneValue(spec.scene, control.targetPath);
     if (current === null) {
@@ -257,7 +270,6 @@ function checkCounterfactuals(spec: ExperimentSpec): string[] {
       ...checkPrediction(spec, counterfactual.prediction, `${label}.prediction`),
     );
     if (
-      spec.scene.family !== "pendulum" &&
       counterfactual.prediction.testChange &&
       (counterfactual.prediction.testChange.targetPath !==
         counterfactual.change.targetPath ||

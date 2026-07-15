@@ -2082,7 +2082,7 @@ button:disabled {
   color: var(--green);
 }
 
-.environment-button {
+.environment-summary {
   min-width: 142px;
   min-height: 46px;
   display: flex;
@@ -2095,20 +2095,23 @@ button:disabled {
   background: #080d14;
   color: #d9e1e4;
   text-align: left;
-  cursor: pointer;
 }
 
-.environment-button span {
+.environment-summary span {
   display: grid;
   gap: 3px;
   font-size: 10px;
 }
 
-.environment-button small {
+.environment-summary small {
   color: #677983;
   font-family: var(--font-geist-mono);
   font-size: 6px;
   letter-spacing: 0.13em;
+}
+
+.environment-summary > svg {
+  color: var(--green);
 }
 
 .lab-grid {
@@ -3057,5 +3060,29 @@ button:disabled {
   .progress-rail > div::before {
     width: 10px;
     left: -14px;
+  }
+}
+
+.simulation-stage.simulation-stage-expanded {
+  position: fixed;
+  z-index: 120;
+  inset: 12px;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  grid-template-rows: 40px minmax(320px, 1fr) 58px 160px;
+  border: 1px solid var(--lab-rule-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #04070c;
+  box-shadow: 0 32px 120px rgba(0, 0, 0, 0.8);
+}
+
+@media (max-width: 700px) {
+  .simulation-stage.simulation-stage-expanded {
+    inset: 0;
+    grid-template-rows: 40px minmax(300px, 1fr) 56px 250px;
+    border: 0;
+    border-radius: 0;
   }
 }

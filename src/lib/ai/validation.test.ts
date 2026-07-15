@@ -92,6 +92,21 @@ describe("validateExperimentSpec", () => {
     );
   });
 
+  it("rejects controls whose browser range would snap to another value", () => {
+    expectErrors(
+      specWith(projectileFixture, (s) => {
+        s.controls[2]!.step = 0.5;
+      }),
+      "not aligned to step",
+    );
+    expectErrors(
+      specWith(projectileFixture, (s) => {
+        s.controls[2]!.step = 20;
+      }),
+      "must not exceed the control range",
+    );
+  });
+
   it("rejects counterfactual patches outside bounds or without change", () => {
     expectErrors(
       specWith(dropFixture, (s) => {
@@ -191,22 +206,23 @@ describe("validateExperimentSpec", () => {
     );
   });
 
-  it("rejects experiments that exceed 20 s of simulated time", () => {
-    expectErrors(
+  it("accepts contract-valid experiments beyond the 20 s authoring preference", () => {
+    const result = validateExperimentSpec(
       specWith(dropFixture, (s) => {
         if (s.scene.family !== "drop") return;
         s.scene.airDensity = 2;
         s.scene.height = 20;
-        s.scene.objects[0] = {
-          ...s.scene.objects[0],
+        s.scene.objects = s.scene.objects.map((body) => ({
+          ...body,
           mass: 0.05,
           radius: 2,
           dragCoefficient: 2.5,
-        };
+        })) as typeof s.scene.objects;
         s.controls = [];
       }),
-      "20 s",
     );
+
+    expect(result.ok, JSON.stringify(result)).toBe(true);
   });
 
   it("rejects markup, code, shader source, and file paths in text", () => {
@@ -261,6 +277,15 @@ describe("validateExperimentSpec", () => {
         s.prediction.testChange = { targetPath: "scene.bob.mass", value: 2 }; // unchanged
       }),
       "must differ",
+    );
+    expectErrors(
+      specWith(pendulumFixture, (s) => {
+        s.counterfactuals[0]!.prediction.testChange = {
+          targetPath: "scene.bob.mass",
+          value: 12,
+        };
+      }),
+      "must match the counterfactual change",
     );
   });
 });

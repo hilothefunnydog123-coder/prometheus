@@ -81,7 +81,7 @@ export const projectileDemo: ExperimentSpec = {
   controls: [
     { id: "speed", label: "Launch speed", unit: "m/s", min: 8, max: 24, step: 1, value: 15, targetPath: "scene.launch.speed" },
     { id: "angle", label: "Launch angle", unit: "°", min: 15, max: 70, step: 1, value: 45, targetPath: "scene.launch.angleDegrees" },
-    { id: "gravity", label: "Gravity", unit: "m/s²", min: 2, max: 15, step: 0.5, value: 9.81, targetPath: "scene.gravity" },
+    { id: "gravity", label: "Gravity", unit: "m/s²", min: 2, max: 15, step: 0.01, value: 9.81, targetPath: "scene.gravity" },
   ],
   measurements: [
     { id: "position", label: "Horizontal position", unit: "m", color: "#ff8a3d" },

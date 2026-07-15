@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { escapeHtml } from "@/lib/ai/errors";
 import {
   evaluateExplanation,
   evaluationInputSchema,
@@ -39,7 +38,7 @@ function errorResponse(
   message: string,
 ): NextResponse {
   return NextResponse.json(
-    { error: { code, message: escapeHtml(message) } },
+    { error: { code, message } },
     { status },
   );
 }

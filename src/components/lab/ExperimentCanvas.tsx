@@ -410,7 +410,7 @@ export function ExperimentCanvas({ spec, runToken, launched, capturing, paused, 
         className="experiment-canvas"
         dpr={[1, 1.5]}
         camera={camera}
-        shadows
+        shadows="percentage"
         gl={{ antialias: true, powerPreference: "high-performance" }}
         aria-label={`Interactive 3D simulation: ${spec.title}`}
       >

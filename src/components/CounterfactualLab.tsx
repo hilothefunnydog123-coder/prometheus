@@ -7,7 +7,6 @@ import {
   Atom,
   BadgeCheck,
   Check,
-  ChevronDown,
   ChevronRight,
   CircleGauge,
   Expand,
@@ -15,6 +14,7 @@ import {
   ImagePlus,
   Lightbulb,
   LockKeyhole,
+  Minimize2,
   Minus,
   Orbit,
   Pause,
@@ -49,6 +49,7 @@ import { EvidenceChart } from "@/components/lab/EvidenceChart";
 import { SimulationErrorBoundary } from "@/components/lab/SimulationErrorBoundary";
 import {
   applyCounterfactual,
+  PROJECTILE_AIR_DENSITY_KG_PER_CUBIC_METER,
   type SimulationEvidence,
   updateScenePath,
 } from "@/lib/physics/evidence";
@@ -216,6 +217,13 @@ function Landing({
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const clearImage = () => {
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImage(null);
+    setImagePreview(null);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
   const onFile = async (file?: File) => {
     if (!file) return;
     try {
@@ -225,8 +233,7 @@ function Landing({
       setImagePreview(URL.createObjectURL(prepared));
       setError(null);
     } catch (uploadError) {
-      setImage(null);
-      setImagePreview(null);
+      clearImage();
       setError(
         uploadError instanceof Error
           ? uploadError.message
@@ -261,8 +268,8 @@ function Landing({
           <div className="console-header">
             <span><FlaskConical size={16} /> CREATE AN EXPERIMENT</span>
             <div className="grade-switch" aria-label="Grade level">
-              <button className={gradeBand === "8-10" ? "active" : ""} onClick={() => setGradeBand("8-10")}>8–10</button>
-              <button className={gradeBand === "11-12" ? "active" : ""} onClick={() => setGradeBand("11-12")}>11–12</button>
+              <button aria-pressed={gradeBand === "8-10"} className={gradeBand === "8-10" ? "active" : ""} onClick={() => setGradeBand("8-10")}>8–10</button>
+              <button aria-pressed={gradeBand === "11-12"} className={gradeBand === "11-12" ? "active" : ""} onClick={() => setGradeBand("11-12")}>11–12</button>
             </div>
           </div>
           <label htmlFor="experiment-question">What do you want to understand?</label>
@@ -278,19 +285,23 @@ function Landing({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={imagePreview} alt="Uploaded textbook diagram preview" />
               <div><ImagePlus size={15} /><span>Diagram ready</span><small>Compressed and stripped of metadata</small></div>
-              <button aria-label="Remove image" onClick={() => { URL.revokeObjectURL(imagePreview); setImage(null); setImagePreview(null); }}><X size={16} /></button>
+              <button aria-label="Remove image" onClick={clearImage}><X size={16} /></button>
             </div>
           )}
           <div className="console-actions">
             <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => onFile(event.target.files?.[0])} />
-            <button className="upload-button" onClick={() => fileRef.current?.click()}>
+            <button className="upload-button" onClick={() => {
+              if (!fileRef.current) return;
+              fileRef.current.value = "";
+              fileRef.current.click();
+            }}>
               <Upload size={16} /> {image ? "Replace diagram" : "Add diagram"}
             </button>
             <button className="compile-button" disabled={!prompt.trim() && !image} onClick={() => compile()}>
               Build my world <ArrowRight size={17} />
             </button>
           </div>
-          {error && <p className="form-error">{error}</p>}
+          {error && <p className="form-error" role="alert">{error}</p>}
           <p className="privacy-note"><span /> Images are analyzed in memory and never saved.</p>
         </div>
       </section>
@@ -322,7 +333,11 @@ function ProgressRail({ phase }: { phase: Phase }) {
   return (
     <div className="progress-rail">
       {steps.map((step, index) => (
-        <div key={step} className={`${index === active ? "current" : ""} ${index < active ? "done" : ""}`}>
+        <div
+          key={step}
+          aria-current={index === active ? "step" : undefined}
+          className={`${index === active ? "current" : ""} ${index < active ? "done" : ""}`}
+        >
           <span>{index < active ? <Check size={11} /> : index + 1}</span>
           <small>{step}</small>
         </div>
@@ -371,6 +386,7 @@ function PredictionPanel({
           <button
             key={choice.id}
             className={selected === choice.id ? "selected" : ""}
+            aria-pressed={selected === choice.id}
             disabled={running}
             onClick={() => setSelected(choice.id)}
           >
@@ -406,6 +422,19 @@ function PredictionPanel({
   );
 }
 
+function chartTitle(spec: ExperimentSpec) {
+  if (spec.scene.family === "drop") return "Height vs. time";
+  if (spec.scene.family === "projectile") {
+    return "Position and height vs. time";
+  }
+  return "Angle and speed vs. time";
+}
+
+function precisionForStep(step: number) {
+  const decimal = step.toString().split(".")[1];
+  return Math.min(decimal?.length ?? 0, 3);
+}
+
 function EvidencePanel({
   spec,
   evidence,
@@ -434,7 +463,7 @@ function EvidencePanel({
         <div><small>{evidence.metricA.label}</small><strong>{evidence.metricA.value}</strong></div>
         <div><small>{evidence.metricB.label}</small><strong>{evidence.metricB.value}</strong></div>
       </div>
-      <div className="chart-heading"><span>Height vs. time</span><small>Recorded evidence</small></div>
+      <div className="chart-heading"><span>{chartTitle(spec)}</span><small>Recorded evidence</small></div>
       <EvidenceChart spec={spec} evidence={evidence} />
       <div className="insight-strip">
         <Lightbulb size={19} aria-hidden="true" />
@@ -473,7 +502,7 @@ function FeedbackPanel({
         <span>WHAT WE OBSERVED</span>
         <p>{evidence.summary}</p>
       </section>
-      <div className="chart-heading"><span>Height vs. time</span><small>Run 1 of 1</small></div>
+      <div className="chart-heading"><span>{chartTitle(spec)}</span><small>Run 1 evidence</small></div>
       <EvidenceChart spec={spec} evidence={evidence} />
       <div className="insight-strip validated">
         <BadgeCheck size={20} aria-hidden="true" />
@@ -541,6 +570,9 @@ function LabWorkspace({
   const [transferCorrect, setTransferCorrect] = useState(false);
   const [transferMode, setTransferMode] = useState(false);
   const [mastery, setMastery] = useState(25);
+  const [simulationExpanded, setSimulationExpanded] = useState(false);
+  const preRunSpec = useRef(spec);
+  const simulationStage = useRef<HTMLElement>(null);
 
   useEffect(() => {
     setMastery(
@@ -548,16 +580,67 @@ function LabWorkspace({
     );
   }, [spec.misconception.id]);
 
+  useEffect(() => {
+    if (!simulationExpanded) return;
+    const previousOverflow = document.body.style.overflow;
+    const handleExpandedKeyboard = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSimulationExpanded(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        simulationStage.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleExpandedKeyboard);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleExpandedKeyboard);
+    };
+  }, [simulationExpanded]);
+
   const capturing = phase === "running" || phase === "counterfactual-running";
   const counterfactual = transferMode || phase === "counterfactual-predicting" || phase === "counterfactual-running";
   const chosen = spec.prediction.choices.find((choice) => choice.id === selected);
   const predictionLabel = chosen?.label ?? "an outcome that is still being tested";
-  const canEditControls = !launched && (phase === "predicting" || phase === "counterfactual-predicting");
+  const canEditControls = !launched && phase === "predicting";
   const hasRun = launched || Boolean(evidence);
-  const airDensity = "airDensity" in spec.scene ? spec.scene.airDensity : 0;
+  const environment =
+    spec.scene.family === "drop"
+      ? {
+          name: spec.scene.airDensity > 0 ? "Air (Earth)" : "Vacuum",
+          density: spec.scene.airDensity,
+        }
+      : spec.scene.family === "projectile"
+        ? {
+            name:
+              spec.scene.object.dragCoefficient > 0
+                ? "Air (Earth)"
+                : "Vacuum",
+            density:
+              spec.scene.object.dragCoefficient > 0
+                ? PROJECTILE_AIR_DENSITY_KG_PER_CUBIC_METER
+                : 0,
+          }
+        : { name: "Idealized lab", density: 0 };
 
   const run = () => {
     if (!selected || capturing) return;
+    preRunSpec.current = spec;
     const testChange = spec.prediction.testChange;
     if (testChange) {
       const updated = updateScenePath(
@@ -624,34 +707,17 @@ function LabWorkspace({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          explanation,
-          context: {
-            family: spec.scene.family,
-            question: spec.prediction.reasoningPrompt,
-            concepts: [spec.misconception.id],
-          },
+          experimentId: spec.id,
+          observedOutcome: evidence?.outcomeKey,
+          studentExplanation: explanation,
+          misconception: spec.misconception,
         }),
       });
       if (!response.ok) {
         setEvaluation(fallback);
       } else {
-        const data = (await response.json()) as {
-          evaluation: {
-            scores: { correctness: number; mechanism: number; vocabulary: number };
-            feedback: string;
-          };
-          overall: number;
-        };
-        setEvaluation({
-          score: data.overall,
-          criteria: {
-            correctness: data.evaluation.scores.correctness >= 2,
-            mechanism: data.evaluation.scores.mechanism >= 2,
-            vocabulary: data.evaluation.scores.vocabulary >= 2,
-          },
-          feedback: data.evaluation.feedback,
-          hint: nextHint,
-        });
+        const data = (await response.json()) as EvaluationResponse;
+        setEvaluation(data);
       }
     } catch {
       setEvaluation(fallback);
@@ -665,7 +731,9 @@ function LabWorkspace({
       setPhase("complete");
       return;
     }
-    setSpec(applyCounterfactual(spec, next));
+    const counterfactualSpec = applyCounterfactual(spec, next);
+    preRunSpec.current = counterfactualSpec;
+    setSpec(counterfactualSpec);
     setTransferMode(true);
     setSelected(null);
     setExplanation("");
@@ -682,16 +750,26 @@ function LabWorkspace({
     if (!control) return;
     const nextValue = Math.min(control.max, Math.max(control.min, value));
     const updated = updateScenePath(spec, control.targetPath, nextValue);
-    setSpec({ ...updated, controls: updated.controls.map((item) => (item.id === id ? { ...item, value: nextValue } : item)) });
+    const nextSpec = { ...updated, controls: updated.controls.map((item) => (item.id === id ? { ...item, value: nextValue } : item)) };
+    preRunSpec.current = nextSpec;
+    setSpec(nextSpec);
     setRunToken((token) => token + 1);
   };
 
   const resetSimulation = () => {
+    setSpec(preRunSpec.current);
     setLaunched(false);
     setPaused(false);
     setEvidence(null);
     setRunToken((value) => value + 1);
     setPhase(counterfactual ? "counterfactual-predicting" : "predicting");
+  };
+
+  const clearRun = () => {
+    resetSimulation();
+    setSelected(null);
+    setExplanation("");
+    setEvaluation(null);
   };
 
   const replay = () => {
@@ -719,20 +797,34 @@ function LabWorkspace({
         </div>
         <div className="lab-context">
           {compilerNotice && <span className="compiler-notice"><ShieldCheck size={13} /> {compilerNotice}</span>}
-          <button type="button" className="environment-button" aria-label="Environment: Air on Earth">
-            <span><small>ENVIRONMENT</small>Air (Earth)</span><ChevronDown size={14} />
-          </button>
+          <div className="environment-summary" aria-label={`Environment: ${environment.name}`}>
+            <span><small>ENVIRONMENT</small>{environment.name}</span>
+            <ShieldCheck size={14} aria-hidden="true" />
+          </div>
         </div>
       </div>
 
       <div className="lab-grid">
-        <section className="simulation-stage">
+        <section
+          ref={simulationStage}
+          className={`simulation-stage ${simulationExpanded ? "simulation-stage-expanded" : ""}`}
+          role={simulationExpanded ? "dialog" : undefined}
+          aria-modal={simulationExpanded || undefined}
+          aria-label={simulationExpanded ? "Expanded simulation view" : undefined}
+        >
           <div className="stage-toolbar">
             <div><span className="status-light" /> {capturing ? paused ? "SIMULATION PAUSED" : "SIMULATION RUNNING" : hasRun ? "EVIDENCE CAPTURED" : "WORLD READY"}</div>
             <div className="stage-tools">
               <span>drag to inspect</span>
               <button type="button" aria-label="Reset simulation" onClick={resetSimulation}><RotateCcw size={14} /></button>
-              <button type="button" aria-label="Expand simulation view"><Expand size={14} /></button>
+              <button
+                type="button"
+                aria-label={simulationExpanded ? "Exit expanded simulation view" : "Expand simulation view"}
+                aria-expanded={simulationExpanded}
+                onClick={() => setSimulationExpanded((value) => !value)}
+              >
+                {simulationExpanded ? <Minimize2 size={14} /> : <Expand size={14} />}
+              </button>
             </div>
           </div>
           <div className="canvas-shell">
@@ -753,7 +845,7 @@ function LabWorkspace({
             </div>
             <div className="environment-readout">
               <span><i>g</i> {spec.scene.gravity.toFixed(2)} m/s²</span>
-              <span><i>ρ</i> {airDensity.toFixed(3)} kg/m³</span>
+              <span><i>ρ</i> {environment.density.toFixed(3)} kg/m³</span>
             </div>
             <div className="canvas-vignette-copy"><p>{spec.sourceSummary}</p></div>
             {capturing && <div className="capture-badge"><span />{paused ? <Play size={12} /> : <Pause size={12} />} {paused ? "observation paused" : "collecting evidence"}</div>}
@@ -774,14 +866,14 @@ function LabWorkspace({
             <button type="button" className="timeline-reset" aria-label="Reset experiment" onClick={resetSimulation}><RotateCcw size={15} /></button>
           </div>
           <div className="control-deck">
-            <div className="control-heading"><span><CircleGauge size={15} /> CONTROLLED VARIABLES</span><small>{hasRun ? "locked for this run" : "change one thing at a time"}</small></div>
+            <div className="control-heading"><span><CircleGauge size={15} /> CONTROLLED VARIABLES</span><small>{canEditControls ? "change one thing at a time" : counterfactual ? "locked for transfer test" : "locked for this run"}</small></div>
             <div className="controls-grid">
               {spec.controls.map((control, index) => (
                 <div key={control.id} className={`variable-control variable-${index + 1}`}>
                   <label htmlFor={`control-${control.id}`}>{control.label}</label>
                   <div className="stepper-control">
                     <button type="button" disabled={!canEditControls || control.value <= control.min} aria-label={`Decrease ${control.label}`} onClick={() => changeControl(control.id, control.value - control.step)}><Minus size={14} /></button>
-                    <output htmlFor={`control-${control.id}`}>{control.value.toFixed(control.step < 1 ? 1 : 0)}</output>
+                    <output htmlFor={`control-${control.id}`}>{control.value.toFixed(precisionForStep(control.step))}</output>
                     <button type="button" disabled={!canEditControls || control.value >= control.max} aria-label={`Increase ${control.label}`} onClick={() => changeControl(control.id, control.value + control.step)}><Plus size={14} /></button>
                     <span>{control.unit}</span>
                   </div>
@@ -795,7 +887,7 @@ function LabWorkspace({
         <aside className="learning-panel">
           <div className="notebook-header">
             <div><FlaskConical size={17} /><span>{phase === "predicting" || phase === "counterfactual-predicting" ? "HYPOTHESIS NOTEBOOK" : "EVIDENCE NOTEBOOK"}</span></div>
-            <button type="button" onClick={resetSimulation}><RotateCcw size={13} /> Clear run</button>
+            <button type="button" onClick={clearRun}><RotateCcw size={13} /> Clear run</button>
           </div>
           <div className="notebook-scroll">
             {(phase === "predicting" || phase === "counterfactual-predicting" || phase === "running" || phase === "counterfactual-running") && (
@@ -848,10 +940,20 @@ export function CounterfactualLab() {
     window.scrollTo({ top: 0, behavior: "auto" });
   }, [phase]);
 
+  useEffect(() => {
+    if (phase !== "compiling") return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [phase]);
+
   const reset = () => {
     setPhase("input");
     setError(null);
     setCompilerNotice(null);
+    setPrompt("");
     setImage(null);
     if (imagePreview) URL.revokeObjectURL(imagePreview);
     setImagePreview(null);
@@ -919,6 +1021,9 @@ export function CounterfactualLab() {
     }
     setCompilerNotice(nextCompilerNotice);
     setSpec(structuredClone(generated ?? fallback));
+    setImage(null);
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImagePreview(null);
     setPhase("predicting");
   };
 

@@ -7,7 +7,6 @@ import {
   type SupportedImageMimeType,
 } from "@/lib/ai/analyze-input";
 import { compileExperiment } from "@/lib/ai/compile-experiment";
-import { escapeHtml } from "@/lib/ai/errors";
 import { validateImageData } from "@/lib/ai/image-validation";
 import {
   mediaTypeOf,
@@ -48,7 +47,7 @@ function errorResponse(
   message: string,
 ): NextResponse {
   return NextResponse.json(
-    { error: { code, message: escapeHtml(message) } },
+    { error: { code, message } },
     { status },
   );
 }
