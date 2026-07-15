@@ -1,53 +1,76 @@
-import type { ExperimentSpec } from "@/lib/ai/contracts/experiment-spec";
+import type { ExperimentSpec } from "@/lib/contracts/experiment";
 
 /**
- * Golden fixture: classic free-fall drop. Fall time from 20 m at g = 9.81
- * is sqrt(2h/g) ≈ 2.02 s, comfortably inside the 6 s simulation window —
- * including every counterfactual (Moon gravity needs ≈ 4.97 s).
+ * Golden fixture: the Galileo drop. Mirrors the renderer's built-in demo so
+ * the fallback experience matches the frontend exactly. In vacuum both
+ * spheres land together (tie); the counterfactual turns air on, and the
+ * heavier sphere (same size/shape) wins because its drag-to-mass ratio is
+ * smaller. Server-computed outcomes: base = tie, add-drag = object_a_first.
  */
 export const dropFixture: ExperimentSpec = {
-  id: "fixture-drop-classic",
-  family: "drop",
-  title: "The Two-Second Tower Drop",
-  description:
-    "A 1 kg ball is released from rest at the top of a 20 m tower. Watch it fall, then test what actually changes the fall time — and what does not.",
-  concepts: ["free-fall", "acceleration"],
-  parameters: {
+  version: "1.0",
+  id: "galileo-drop",
+  title: "The Galileo Drop",
+  gradeBand: "8-10",
+  objective: "Test whether mass changes the acceleration of a falling object.",
+  sourceSummary:
+    "Two spheres begin at the same height with equal size and shape, but different masses.",
+  scene: {
+    family: "drop",
     gravity: 9.81,
-    mass: 1,
-    height: 20,
-  },
-  simulation: {
-    duration: 6,
-    timestep: 1 / 60,
-  },
-  prediction: {
-    question:
-      "A 1 kg ball is dropped from a 20 m tower. About how long does it take to reach the ground?",
-    outcomes: [
-      { id: "one-second", label: "About 1 second" },
-      { id: "two-seconds", label: "About 2 seconds" },
-      { id: "four-seconds", label: "About 4 seconds" },
+    height: 8,
+    airDensity: 0,
+    objects: [
+      { id: "heavy", mass: 8, radius: 0.48, dragCoefficient: 0.47, color: "#ff8a3d" },
+      { id: "light", mass: 1, radius: 0.48, dragCoefficient: 0.47, color: "#5de1ff" },
     ],
-    correctOutcomeId: "two-seconds",
+  },
+  controls: [
+    { id: "mass-a", label: "Orange mass", unit: "kg", min: 1, max: 16, step: 1, value: 8, targetPath: "scene.objects.0.mass" },
+    { id: "mass-b", label: "Blue mass", unit: "kg", min: 1, max: 16, step: 1, value: 1, targetPath: "scene.objects.1.mass" },
+    { id: "height", label: "Drop height", unit: "m", min: 3, max: 14, step: 1, value: 8, targetPath: "scene.height" },
+  ],
+  measurements: [
+    { id: "height-a", label: "Orange height", unit: "m", color: "#ff8a3d" },
+    { id: "height-b", label: "Blue height", unit: "m", color: "#5de1ff" },
+  ],
+  prediction: {
+    prompt: "Released at exactly the same moment, which sphere reaches the floor first?",
+    reasoningPrompt: "What evidence from the motion supports your answer?",
+    choices: [
+      { id: "heavy", label: "The 8 kg orange sphere", outcomeKey: "object_a_first" },
+      { id: "light", label: "The 1 kg blue sphere", outcomeKey: "object_b_first" },
+      { id: "same", label: "They arrive together", outcomeKey: "tie" },
+    ],
+    correctOutcomeKey: "tie",
+  },
+  misconception: {
+    id: "mass-fall-speed",
+    title: "Heavier means faster",
+    description:
+      "Weight increases gravitational force, but mass increases inertia by the same proportion.",
+    explanationRubric: [
+      "Names equal acceleration",
+      "Separates force from acceleration",
+      "Uses observed timing",
+    ],
   },
   counterfactuals: [
     {
-      id: "ten-times-heavier",
-      label: "Make the ball 10 times heavier",
-      patch: { parameter: "mass", value: 10 },
-    },
-    {
-      id: "moon-gravity",
-      label: "Move the tower to the Moon",
-      patch: { parameter: "gravity", value: 1.62 },
-    },
-    {
-      id: "quarter-height",
-      label: "Drop from 5 m instead of 20 m",
-      patch: { parameter: "height", value: 5 },
+      id: "add-drag",
+      title: "Now let the air interfere",
+      prompt: "Air resistance is introduced while size, shape, and mass stay fixed.",
+      change: { targetPath: "scene.airDensity", value: 1.2 },
+      prediction: {
+        prompt: "With air resistance turned on, which sphere reaches the floor first now?",
+        reasoningPrompt: "How did the drag-to-mass ratio change the result?",
+        choices: [
+          { id: "heavy-drag", label: "The heavy orange sphere", outcomeKey: "object_a_first" },
+          { id: "light-drag", label: "The light blue sphere", outcomeKey: "object_b_first" },
+          { id: "same-drag", label: "They still arrive together", outcomeKey: "tie" },
+        ],
+        correctOutcomeKey: "object_a_first",
+      },
     },
   ],
-  explanationPrompt:
-    "You saw that the 10x heavier ball hit the ground at the same time. Explain why the mass did not change the fall time.",
 };

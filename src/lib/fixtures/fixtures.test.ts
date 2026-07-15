@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { experimentSpecSchema } from "@/lib/contracts/experiment";
 import { validateExperimentSpec } from "@/lib/ai/validation";
 import type { LearningIntent } from "@/lib/ai/contracts/learning-intent";
 import { closestFixture, dropFixture, FIXTURES, getFixtureByFamily } from ".";
@@ -17,7 +18,7 @@ function intent(overrides: Partial<LearningIntent>): LearningIntent {
 
 describe("golden fixtures", () => {
   it("covers exactly the drop, projectile, and pendulum families", () => {
-    expect(FIXTURES.map((f) => f.spec.family).sort()).toEqual([
+    expect(FIXTURES.map((f) => f.spec.scene.family).sort()).toEqual([
       "drop",
       "pendulum",
       "projectile",
@@ -25,37 +26,43 @@ describe("golden fixtures", () => {
   });
 
   it.each(FIXTURES.map((f) => [f.spec.id, f.spec] as const))(
-    "%s passes full validation",
+    "%s parses against the renderer contract",
+    (_id, spec) => {
+      expect(() => experimentSpecSchema.parse(spec)).not.toThrow();
+    },
+  );
+
+  it.each(FIXTURES.map((f) => [f.spec.id, f.spec] as const))(
+    "%s passes full validation with declared correctness equal to computed",
     (_id, spec) => {
       const result = validateExperimentSpec(spec);
       expect(result.ok, JSON.stringify(result)).toBe(true);
+      if (result.ok) {
+        // Deep equality proves the declared correctOutcomeKey values match
+        // the server-computed ones for the base prediction and every
+        // counterfactual.
+        expect(result.spec).toEqual(spec);
+      }
     },
   );
 
   it("getFixtureByFamily returns the matching fixture", () => {
-    expect(getFixtureByFamily("pendulum").spec.family).toBe("pendulum");
+    expect(getFixtureByFamily("pendulum").spec.scene.family).toBe("pendulum");
   });
 });
 
 describe("closestFixture", () => {
   it("uses the intent family when it is known", () => {
-    expect(closestFixture(intent({ family: "projectile" })).spec.family).toBe(
-      "projectile",
-    );
+    expect(
+      closestFixture(intent({ family: "projectile" })).spec.scene.family,
+    ).toBe("projectile");
   });
 
   it("matches unknown intents by topic keywords", () => {
     const chosen = closestFixture(
       intent({ topic: "why does a clock pendulum swing so steadily" }),
     );
-    expect(chosen.spec.family).toBe("pendulum");
-  });
-
-  it("matches unknown intents by concept slugs", () => {
-    const chosen = closestFixture(
-      intent({ topic: "science question", concepts: ["projectile-motion"] }),
-    );
-    expect(chosen.spec.family).toBe("projectile");
+    expect(chosen.spec.scene.family).toBe("pendulum");
   });
 
   it("defaults to the drop fixture when nothing matches", () => {

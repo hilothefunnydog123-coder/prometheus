@@ -1,54 +1,75 @@
-import type { ExperimentSpec } from "@/lib/ai/contracts/experiment-spec";
+import type { ExperimentSpec } from "@/lib/contracts/experiment";
 
 /**
- * Golden fixture: simple pendulum. One period is 2π·sqrt(L/g) ≈ 2.84 s at
- * the base settings; the slowest counterfactual (Moon gravity, ≈ 6.98 s)
- * still completes one full period inside the 10 s simulation window.
+ * Golden fixture: the massless clock. Mirrors the renderer's demo, with the
+ * base prediction's controlled comparison made declarative via testChange
+ * (bob mass 2 kg → 12 kg, i.e. "six times heavier"): the small-angle period
+ * 2π·sqrt(L/g) is mass-independent → period_unchanged. The counterfactual
+ * lengthens the string 1.8 m → 3.2 m → period_increases.
  */
 export const pendulumFixture: ExperimentSpec = {
-  id: "fixture-pendulum-period",
-  family: "pendulum",
-  title: "What Sets a Pendulum's Beat",
-  description:
-    "A 1 kg bob swings on a 2 m string, released from 15 degrees. Predict what changes the time of one full swing — mass, length, or gravity — then test each one.",
-  concepts: ["pendulum-period", "oscillation"],
-  parameters: {
+  version: "1.0",
+  id: "pendulum-period",
+  title: "The Massless Clock",
+  gradeBand: "8-10",
+  objective: "Discover which variables control a pendulum's period.",
+  sourceSummary:
+    "A pendulum swings from a fixed pivot while its energy changes form.",
+  scene: {
+    family: "pendulum",
     gravity: 9.81,
-    mass: 1,
-    length: 2,
-    releaseAngleDeg: 15,
+    length: 1.8,
+    releaseAngleDegrees: 35,
+    damping: 0.08,
+    bob: { id: "bob", mass: 2, radius: 0.42, dragCoefficient: 0.47, color: "#5de1ff" },
   },
-  simulation: {
-    duration: 10,
-    timestep: 1 / 60,
-  },
+  controls: [
+    { id: "length", label: "String length", unit: "m", min: 0.6, max: 4, step: 0.1, value: 1.8, targetPath: "scene.length" },
+    { id: "mass", label: "Bob mass", unit: "kg", min: 0.5, max: 12, step: 0.5, value: 2, targetPath: "scene.bob.mass" },
+    { id: "angle", label: "Release angle", unit: "°", min: 10, max: 60, step: 1, value: 35, targetPath: "scene.releaseAngleDegrees" },
+  ],
+  measurements: [
+    { id: "angle", label: "Angle", unit: "°", color: "#5de1ff" },
+    { id: "speed", label: "Speed", unit: "m/s", color: "#ff8a3d" },
+  ],
   prediction: {
-    question:
-      "If we double the mass of the pendulum bob, what happens to the time of one full swing?",
-    outcomes: [
-      { id: "shorter", label: "The swing gets shorter" },
-      { id: "same", label: "The swing time stays the same" },
-      { id: "longer", label: "The swing gets longer" },
+    prompt: "If the bob becomes six times heavier, what happens to the period?",
+    reasoningPrompt: "What controls the timing of one complete swing?",
+    choices: [
+      { id: "increase", label: "The period increases", outcomeKey: "period_increases" },
+      { id: "decrease", label: "The period decreases", outcomeKey: "period_decreases" },
+      { id: "unchanged", label: "The period stays the same", outcomeKey: "period_unchanged" },
     ],
-    correctOutcomeId: "same",
+    correctOutcomeKey: "period_unchanged",
+    testChange: { targetPath: "scene.bob.mass", value: 12 },
+  },
+  misconception: {
+    id: "pendulum-mass",
+    title: "A heavier bob swings faster",
+    description:
+      "Mass scales gravitational force and inertia together, so it cancels from the period.",
+    explanationRubric: [
+      "Identifies length",
+      "Identifies gravity",
+      "Explains why mass cancels",
+    ],
   },
   counterfactuals: [
     {
-      id: "double-mass",
-      label: "Double the mass of the bob",
-      patch: { parameter: "mass", value: 2 },
-    },
-    {
-      id: "quarter-length",
-      label: "Shorten the string to 0.5 m",
-      patch: { parameter: "length", value: 0.5 },
-    },
-    {
-      id: "moon-gravity",
-      label: "Swing it on the Moon",
-      patch: { parameter: "gravity", value: 1.62 },
+      id: "longer-string",
+      title: "Change the clock, not the weight",
+      prompt: "Lengthen the pendulum from 1.8 m to 3.2 m.",
+      change: { targetPath: "scene.length", value: 3.2 },
+      prediction: {
+        prompt: "With a longer string, what happens to the period?",
+        reasoningPrompt: "How does a longer path change the timing?",
+        choices: [
+          { id: "increase-2", label: "The period increases", outcomeKey: "period_increases" },
+          { id: "decrease-2", label: "The period decreases", outcomeKey: "period_decreases" },
+          { id: "unchanged-2", label: "The period stays the same", outcomeKey: "period_unchanged" },
+        ],
+        correctOutcomeKey: "period_increases",
+      },
     },
   ],
-  explanationPrompt:
-    "You saw that doubling the mass left the period unchanged. Explain why the bob's mass does not affect the pendulum's period.",
 };

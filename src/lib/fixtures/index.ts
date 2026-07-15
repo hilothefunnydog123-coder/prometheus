@@ -1,15 +1,15 @@
-import type {
-  ExperimentFamily,
-  ExperimentSpec,
-} from "@/lib/ai/contracts/experiment-spec";
+import type { ExperimentSpec } from "@/lib/contracts/experiment";
 import type { LearningIntent } from "@/lib/ai/contracts/learning-intent";
+import type { ExperimentFamily } from "@/lib/ai/text-rules";
 import { dropFixture } from "./drop";
 import { pendulumFixture } from "./pendulum";
 import { projectileFixture } from "./projectile";
 
 /**
- * Bundled golden fixtures. Every fixture passes validateExperimentSpec
- * (asserted in tests) so the fallback path can never serve an invalid spec.
+ * Bundled golden fixtures on the renderer contract. Every fixture passes
+ * validateExperimentSpec with its declared correctOutcomeKey values equal to
+ * the server-computed ones (asserted in tests), so the fallback path can
+ * never serve an invalid or self-contradictory spec.
  */
 
 export interface Fixture {
@@ -26,56 +26,28 @@ export const FIXTURES: readonly Fixture[] = [
   {
     spec: dropFixture,
     keywords: [
-      "drop",
-      "fall",
-      "falling",
-      "free",
-      "tower",
-      "gravity",
-      "weight",
-      "heavy",
-      "mass",
-      "galileo",
-      "acceleration",
+      "drop", "fall", "falling", "free", "tower", "gravity", "weight",
+      "heavy", "mass", "galileo", "acceleration",
     ],
   },
   {
     spec: projectileFixture,
     keywords: [
-      "projectile",
-      "launch",
-      "throw",
-      "throwing",
-      "angle",
-      "range",
-      "cannon",
-      "kick",
-      "trajectory",
-      "basketball",
-      "arc",
-      "motion",
+      "projectile", "launch", "throw", "throwing", "angle", "range",
+      "cannon", "kick", "trajectory", "basketball", "arc", "motion",
     ],
   },
   {
     spec: pendulumFixture,
     keywords: [
-      "pendulum",
-      "swing",
-      "swinging",
-      "period",
-      "oscillate",
-      "oscillation",
-      "bob",
-      "clock",
-      "grandfather",
-      "harmonic",
+      "pendulum", "swing", "swinging", "period", "oscillate", "oscillation",
+      "bob", "clock", "grandfather", "harmonic",
     ],
   },
 ];
 
 export function getFixtureByFamily(family: ExperimentFamily): Fixture {
-  const fixture = FIXTURES.find((f) => f.spec.family === family);
-  // All families are covered by construction; keep the invariant loud.
+  const fixture = FIXTURES.find((f) => f.spec.scene.family === family);
   if (!fixture) throw new Error(`no fixture for family ${family}`);
   return fixture;
 }
