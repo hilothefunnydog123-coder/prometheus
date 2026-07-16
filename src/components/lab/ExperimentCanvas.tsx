@@ -1,7 +1,21 @@
 "use client";
 
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Html, Line, OrbitControls, RoundedBox, Sparkles } from "@react-three/drei";
+import {
+  Html,
+  Line,
+  OrbitControls,
+  RoundedBox,
+  Sparkles,
+  Stars,
+} from "@react-three/drei";
+import {
+  Bloom,
+  ChromaticAberration,
+  EffectComposer,
+  Vignette,
+} from "@react-three/postprocessing";
+import { BlendFunction } from "postprocessing";
 import {
   BallCollider,
   CuboidCollider,
@@ -35,12 +49,21 @@ function LabFloor({ span = 28 }: { span?: number }) {
     <>
       <RigidBody type="fixed" friction={0.9} restitution={0.1}>
         <CuboidCollider args={[span / 2, 0.12, 5]} position={[span / 4, -0.12, 0]} />
+        {/* Dark near-mirror deck: low roughness picks up the key/rim spots as
+            long streaked reflections under the falling bodies. */}
         <mesh receiveShadow position={[span / 4, -0.13, 0]}>
-          <boxGeometry args={[span, 0.24, 10]} />
-          <meshStandardMaterial color="#080d16" roughness={0.82} metalness={0.24} />
+          <boxGeometry args={[span, 0.24, 12]} />
+          <meshStandardMaterial
+            color="#060a12"
+            roughness={0.38}
+            metalness={0.62}
+            envMapIntensity={0.6}
+          />
         </mesh>
       </RigidBody>
-      <gridHelper args={[span, Math.max(14, span), "#1f8399", "#13212c"]} position={[span / 4, 0.01, 0]} />
+      {/* Two offset grids (fine + coarse accent) give the floor depth. */}
+      <gridHelper args={[span, Math.max(28, span * 2), "#2a6f86", "#101d28"]} position={[span / 4, 0.011, 0]} />
+      <gridHelper args={[span, Math.max(7, Math.round(span / 2)), "#3f9fbf", "#101d28"]} position={[span / 4, 0.012, 0]} />
     </>
   );
 }
@@ -330,12 +353,26 @@ function World({
 }: Omit<ExperimentCanvasProps, "runToken"> & { onReady: () => void }) {
   return (
     <>
-      <color attach="background" args={["#050810"]} />
-      <fog attach="fog" args={["#050810", 16, 46]} />
-      <ambientLight intensity={0.7} color="#7ea8c0" />
-      <directionalLight castShadow position={[7, 13, 8]} intensity={2.4} color="#d9f3ff" shadow-mapSize={[1024, 1024]} />
-      <spotLight position={[-8, 10, 3]} intensity={90} angle={0.34} penumbra={0.8} color="#ff7138" />
-      <spotLight position={[8, 9, -4]} intensity={70} angle={0.38} penumbra={0.85} color="#42d9ff" />
+      <color attach="background" args={["#04060d"]} />
+      <fog attach="fog" args={["#04060d", 18, 52]} />
+      {/* Deep-space backdrop: a slow-drifting starfield reads as an
+          observatory rather than an empty void. Cheap, additive glow. */}
+      <Stars
+        radius={120}
+        depth={60}
+        count={1400}
+        factor={4}
+        saturation={0}
+        fade
+        speed={0.6}
+      />
+      <hemisphereLight args={["#9fd0ff", "#0a1220", 0.55]} />
+      <ambientLight intensity={0.55} color="#7ea8c0" />
+      <directionalLight castShadow position={[7, 13, 8]} intensity={2.6} color="#d9f3ff" shadow-mapSize={[1024, 1024]} />
+      {/* Warm key and cool rim frame every object with a two-tone edge glow. */}
+      <spotLight position={[-8, 10, 3]} intensity={120} angle={0.34} penumbra={0.85} color="#ff7138" />
+      <spotLight position={[8, 9, -4]} intensity={95} angle={0.38} penumbra={0.9} color="#42d9ff" />
+      <pointLight position={[0, 2, 9]} intensity={26} distance={26} color="#8ea4ff" />
       <Suspense fallback={null}>
         <Physics gravity={[0, -spec.scene.gravity, 0]} timeStep={1 / 60} interpolate colliders={false} paused={paused}>
           {spec.scene.family === "drop" && <DropScene scene={spec.scene} launched={launched} />}
@@ -360,6 +397,24 @@ function World({
               : [0, 3, 0]
         }
       />
+      {/* Cinematic grade: soft bloom on every emissive, a whisper of lens
+          fringing, and a vignette to seat the scene in the panel. */}
+      <EffectComposer multisampling={0}>
+        <Bloom
+          intensity={0.9}
+          luminanceThreshold={0.35}
+          luminanceSmoothing={0.85}
+          mipmapBlur
+          radius={0.7}
+        />
+        <ChromaticAberration
+          blendFunction={BlendFunction.NORMAL}
+          offset={[0.0006, 0.0009]}
+          radialModulation={false}
+          modulationOffset={0}
+        />
+        <Vignette eskil={false} offset={0.18} darkness={0.72} />
+      </EffectComposer>
     </>
   );
 }
@@ -411,7 +466,12 @@ export function ExperimentCanvas({ spec, runToken, launched, capturing, paused, 
         dpr={[1, 1.5]}
         camera={camera}
         shadows="percentage"
-        gl={{ antialias: true, powerPreference: "high-performance" }}
+        gl={{
+          antialias: true,
+          powerPreference: "high-performance",
+          toneMapping: THREE.ACESFilmicToneMapping,
+          toneMappingExposure: 1.12,
+        }}
         aria-label={`Interactive 3D simulation: ${spec.title}`}
       >
         <World
