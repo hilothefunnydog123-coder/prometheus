@@ -84,18 +84,33 @@ describe("chatCompletion", () => {
     expect(stub.calls[0]!.body.temperature).toBeUndefined();
   });
 
-  it("uses Gemini-compatible automatic tools without optional generation fields", async () => {
+  it("uses Gemini structured output without optional generation fields", async () => {
     const geminiConfig: FeatherlessConfig = {
       ...config,
       maxTokensParameter: null,
       supportsTemperature: false,
-      toolChoiceMode: "auto",
+      structuredOutputMode: "json-schema",
+      reasoningEffort: "minimal",
     };
-    const stub = createFetchStub([
-      toolCallResponse("some_tool", { hello: "gemini" }),
-    ]);
-    await chatCompletion(geminiConfig, { ...request, tool }, stub.fetchImpl);
-    expect(stub.calls[0]!.body.tool_choice).toBe("auto");
+    const stub = createFetchStub([textResponse('{"hello":"gemini"}')]);
+    const result = await chatCompletion(
+      geminiConfig,
+      { ...request, tool },
+      stub.fetchImpl,
+    );
+    expect(result.toolArguments).toBe('{"hello":"gemini"}');
+    expect(stub.calls[0]!.body.tools).toBeUndefined();
+    expect(stub.calls[0]!.body.tool_choice).toBeUndefined();
+    expect(stub.calls[0]!.body.response_format).toEqual({
+      type: "json_schema",
+      json_schema: {
+        name: "some_tool",
+        description: "Return structured output.",
+        strict: true,
+        schema: tool.parameters,
+      },
+    });
+    expect(stub.calls[0]!.body.reasoning_effort).toBe("minimal");
     expect(stub.calls[0]!.body.max_tokens).toBeUndefined();
     expect(stub.calls[0]!.body.max_completion_tokens).toBeUndefined();
     expect(stub.calls[0]!.body.temperature).toBeUndefined();

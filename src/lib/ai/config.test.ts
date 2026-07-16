@@ -47,7 +47,8 @@ describe("getFeatherlessConfig", () => {
       visionModel: DEFAULT_GEMINI_MODEL,
       maxTokensParameter: null,
       supportsTemperature: false,
-      toolChoiceMode: "auto",
+      structuredOutputMode: "json-schema",
+      reasoningEffort: "minimal",
       timeoutMs: DEFAULT_GEMINI_TIMEOUT_MS,
     });
   });

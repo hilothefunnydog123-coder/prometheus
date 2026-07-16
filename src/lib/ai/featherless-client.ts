@@ -235,24 +235,39 @@ async function chatCompletionOnce(
   if (config.supportsTemperature) {
     body.temperature = request.temperature ?? 0.2;
   }
+  if (config.reasoningEffort) {
+    body.reasoning_effort = config.reasoningEffort;
+  }
   if (request.tool) {
-    body.tools = [
-      {
-        type: "function",
-        function: {
+    if (config.structuredOutputMode === "json-schema") {
+      body.response_format = {
+        type: "json_schema",
+        json_schema: {
           name: request.tool.name,
           description: request.tool.description,
-          parameters: request.tool.parameters,
+          strict: true,
+          schema: request.tool.parameters,
         },
-      },
-    ];
-    body.tool_choice =
-      config.toolChoiceMode === "auto"
-        ? "auto"
-        : {
-            type: "function",
-            function: { name: request.tool.name },
-          };
+      };
+    } else {
+      body.tools = [
+        {
+          type: "function",
+          function: {
+            name: request.tool.name,
+            description: request.tool.description,
+            parameters: request.tool.parameters,
+          },
+        },
+      ];
+      body.tool_choice =
+        config.toolChoiceMode === "auto"
+          ? "auto"
+          : {
+              type: "function",
+              function: { name: request.tool.name },
+            };
+    }
   }
 
   try {
@@ -316,16 +331,31 @@ async function chatCompletionOnce(
       typeof message.content === "string" && message.content.trim().length > 0
         ? message.content
         : null;
+    const structuredArguments =
+      request.tool && config.structuredOutputMode === "json-schema"
+        ? content
+        : rawArguments ?? null;
 
-    if (request.tool && message.tool_calls?.length && !toolCall) {
+    if (
+      request.tool &&
+      config.structuredOutputMode !== "json-schema" &&
+      message.tool_calls?.length &&
+      !toolCall
+    ) {
       throw new ModelOutputError("provider called the wrong tool");
     }
-    if (!rawArguments && content === null) {
+    if (structuredArguments !== null &&
+      new TextEncoder().encode(structuredArguments).byteLength >
+        MAX_TOOL_ARGUMENT_BYTES
+    ) {
+      throw new ModelOutputError("structured output exceeded the size limit");
+    }
+    if (!structuredArguments && content === null) {
       throw new ModelOutputError("provider response contained no output");
     }
 
     return {
-      toolArguments: rawArguments ?? null,
+      toolArguments: structuredArguments,
       content,
       latencyMs: Date.now() - startedAt,
     };

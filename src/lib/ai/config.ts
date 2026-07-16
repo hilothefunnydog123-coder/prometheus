@@ -14,6 +14,8 @@ export interface FeatherlessConfig {
   maxTokensParameter: "max_tokens" | "max_completion_tokens" | null;
   supportsTemperature: boolean;
   toolChoiceMode?: "named" | "auto";
+  structuredOutputMode?: "json-schema";
+  reasoningEffort?: "minimal" | "low" | "medium" | "high";
 }
 
 export const DEFAULT_BASE_URL = "https://api.featherless.ai/v1";
@@ -93,12 +95,13 @@ export function getFeatherlessConfig(
         env.GEMINI_BASE_URL?.trim() || DEFAULT_GEMINI_BASE_URL
       ).replace(/\/+$/, ""),
       timeoutMs: geminiTimeoutMs,
-      // Google's OpenAI-compatibility examples use automatic function
-      // selection and omit optional sampling/token fields. Keeping the Gemini
-      // request to that documented surface avoids provider-side HTTP 400s.
+      // Gemini documents structured output for final JSON data. It is a
+      // better fit than optional function calling for renderer specs, while
+      // minimal reasoning keeps the request inside the host deadline.
       maxTokensParameter: null,
       supportsTemperature: false,
-      toolChoiceMode: "auto",
+      structuredOutputMode: "json-schema",
+      reasoningEffort: "minimal",
     };
   }
 

@@ -257,7 +257,7 @@ export const EMIT_EXPERIMENT_SPEC_TOOL: ToolDefinition = {
       objective: { type: "string", minLength: 1, maxLength: 300 },
       sourceSummary: { type: "string", minLength: 1, maxLength: 500 },
       scene: {
-        oneOf: [
+        anyOf: [
           {
             type: "object",
             additionalProperties: false,
