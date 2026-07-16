@@ -51,16 +51,17 @@ const flows: FamilyFlow[] = [
 ];
 
 async function finishLearningLoop(page: Page, flow: FamilyFlow) {
+  let compileRequests = 0;
   await page.route("**/api/compile", async (route) => {
+    compileRequests += 1;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         spec: flow.spec,
-        warnings: [],
+        warnings: ["AI generation is unavailable."],
         provenance: {
-          source: "generated",
-          model: "ci-mocked-model",
+          source: "validated-example",
           generatedAt: new Date(0).toISOString(),
         },
       }),
@@ -99,6 +100,11 @@ async function finishLearningLoop(page: Page, flow: FamilyFlow) {
   await expect(
     page.getByRole("heading", { name: flow.labTitle }),
   ).toBeVisible({ timeout: 10_000 });
+  expect(compileRequests).toBe(0);
+  await expect(page.locator(".form-error")).toHaveCount(0);
+  await expect(
+    page.getByText("pre-coded, not AI-generated", { exact: false }),
+  ).toBeVisible();
 
   const run = page.getByRole("button", { name: "Lock prediction & run" });
   await expect(run).toBeDisabled();
