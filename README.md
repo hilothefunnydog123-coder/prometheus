@@ -34,6 +34,10 @@ analyzeInput ──────────────► LearningIntent (Zod-v
                               │    fixture (drop / projectile / pendulum)
                               ▼
                         ExperimentSpec  ──► 3D renderer (Contributor A)
+                              │               renders src/lib/simulation
+                              ▼               trajectories + outcome numbers
+                 counterfactual reveal: compareCounterfactual diffs the
+                 base vs patched worlds ("mass ×10 → fall time +0%")
 
 learner explanation
         │
@@ -42,7 +46,7 @@ POST /api/evaluate (JSON) ──► evaluateExplanation ──► rubric + feedb
                                    │                   (never touches mastery)
                                    ▼
                      client applies masterySignal via BKT module
-                     (src/lib/mastery/bkt.ts, pure functions)
+                     (src/lib/mastery/bkt.ts + store.ts, pure functions)
 ```
 
 ### Module map (Contributor B's area)
@@ -56,9 +60,12 @@ POST /api/evaluate (JSON) ──► evaluateExplanation ──► rubric + feedb
 | `src/lib/ai/prompts.ts` | System prompts, untrusted-input wrapping, hand-written tool JSON Schemas (Zod stays authoritative). |
 | `src/lib/ai/analyze-input.ts` | text/image → LearningIntent; deterministic keyword heuristic fallback. |
 | `src/lib/ai/compile-experiment.ts` | intent → validated ExperimentSpec; one repair round; fixture fallback. |
-| `src/lib/ai/validation.ts` | Bounds, family feasibility (event fits simulation window), prediction outcome coverage, single-property counterfactual patch checks. |
+| `src/lib/ai/validation.ts` | Bounds, family feasibility (event fits simulation window, amplitude-exact pendulum period), prediction outcome coverage, single-property counterfactual patch checks. |
 | `src/lib/ai/evaluate-explanation.ts` | Explanation → rubric. Total function; heuristic fallback. Never updates mastery. |
+| `src/lib/simulation/` | Deterministic physics, client-safe pure functions: closed-form outcome metrics (AGM-exact pendulum period), trajectory sampling at the spec timestep (RK4 pendulum), and quantitative counterfactual diffs. |
 | `src/lib/mastery/bkt.ts` | Bayesian Knowledge Tracing (pInit .25, pLearn .15, pGuess .20, pSlip .10), pure functions. |
+| `src/lib/mastery/store.ts` | Versioned, serializable per-concept mastery record for localStorage; total deserialization (corrupt data → fresh record); weakest-concept recommendations. |
+| `src/lib/api/rate-limit.ts` | In-memory sliding-window rate limiter keyed by forwarded client IP (30 req/min compile, 60 req/min evaluate). |
 | `src/lib/fixtures/` | Golden fixtures (drop, projectile, pendulum) + deterministic closest-fixture selection. |
 | `src/lib/ai/eval/` | 30-case eval dataset + opt-in `npm run eval:compiler` script (never in CI). |
 | `src/app/api/compile/route.ts` | Multipart endpoint: text ≤ 2000 chars; optional PNG/JPEG/WebP image ≤ 4 MB. |
@@ -81,6 +88,9 @@ POST /api/evaluate (JSON) ──► evaluateExplanation ──► rubric + feedb
   API never returns an invalid spec and never 500s for provider trouble.
 - **Safe errors**: API error messages are static strings (never echo user
   input) and are HTML-escaped as defense in depth.
+- **Rate limiting**: both routes answer 429 + `Retry-After` past the
+  per-client budget (30/min compile, 60/min evaluate). In-memory and
+  per-instance — sized for the single-process hackathon deployment.
 - **No live AI in tests/CI**: unit tests inject a fetch stub; route tests
   stub global fetch with a fail-loudly implementation. The live eval script
   is opt-in and refuses to run when `CI` is set.
@@ -108,3 +118,7 @@ npm run typecheck      # tsc --noEmit
 npm run build          # production build
 npm run eval:compiler  # OPT-IN 30-case eval (live if key set; never in CI)
 ```
+
+CI (`.github/workflows/ci.yml`) runs lint, typecheck, the unit tests, and a
+production build on every push to `main` and every pull request. The live
+eval script is opt-in only and refuses to run when `CI` is set.
