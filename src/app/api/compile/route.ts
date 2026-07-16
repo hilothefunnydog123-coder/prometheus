@@ -66,7 +66,7 @@ function aiErrorResponse(error: unknown): NextResponse {
     return errorResponse(
       503,
       "ai_not_configured",
-      "AI experiment generation is not configured on this deployment. Enable Netlify AI Gateway or add the Featherless API key, then try again.",
+      "AI experiment generation is not configured on this deployment. Add a Gemini or Featherless API key, or enable Netlify AI Gateway, then try again.",
     );
   }
   if (error instanceof ProviderRateLimitError) {

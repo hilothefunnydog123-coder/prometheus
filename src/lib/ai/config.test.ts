@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_GEMINI_BASE_URL,
+  DEFAULT_GEMINI_MODEL,
   DEFAULT_NETLIFY_GATEWAY_MODEL,
   getFeatherlessConfig,
 } from "./config";
@@ -30,6 +32,45 @@ describe("getFeatherlessConfig", () => {
       maxTokensParameter: "max_completion_tokens",
       supportsTemperature: false,
     });
+  });
+
+  it("uses Gemini when GEMINI_API_KEY is configured", () => {
+    const config = getFeatherlessConfig({
+      NODE_ENV: "test",
+      GEMINI_API_KEY: " gemini-key ",
+    });
+    expect(config).toMatchObject({
+      apiKey: "gemini-key",
+      baseUrl: DEFAULT_GEMINI_BASE_URL,
+      textModel: DEFAULT_GEMINI_MODEL,
+      visionModel: DEFAULT_GEMINI_MODEL,
+      maxTokensParameter: "max_tokens",
+      supportsTemperature: true,
+    });
+  });
+
+  it("supports Gemini model and endpoint overrides", () => {
+    const config = getFeatherlessConfig({
+      NODE_ENV: "test",
+      GEMINI_API_KEY: "gemini-key",
+      GEMINI_MODEL: "gemini-custom",
+      GEMINI_VISION_MODEL: "gemini-vision-custom",
+      GEMINI_BASE_URL: "https://gemini.example/openai/",
+    });
+    expect(config).toMatchObject({
+      textModel: "gemini-custom",
+      visionModel: "gemini-vision-custom",
+      baseUrl: "https://gemini.example/openai",
+    });
+  });
+
+  it("prefers explicit Featherless credentials over Gemini", () => {
+    const config = getFeatherlessConfig({
+      NODE_ENV: "test",
+      FEATHERLESS_API_KEY: "featherless-key",
+      GEMINI_API_KEY: "gemini-key",
+    });
+    expect(config?.apiKey).toBe("featherless-key");
   });
 
   it("does not use an unrelated OpenAI key without a gateway base URL", () => {

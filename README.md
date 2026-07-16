@@ -120,16 +120,19 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-For direct Featherless access, copy `.env.example` and set the server-only key:
+For direct Gemini access, copy `.env.example` and set the server-only key:
 
 ```bash
-FEATHERLESS_API_KEY=...
+GEMINI_API_KEY=...
 ```
 
 Optional variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini text routing, compilation, grading, and default vision model |
+| `GEMINI_VISION_MODEL` | text-model value | Gemini uploaded-diagram model override |
+| `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai` | Gemini OpenAI-compatible provider URL |
 | `FEATHERLESS_TEXT_MODEL` | `Qwen/Qwen3-32B` | Text routing, compilation, and grading |
 | `FEATHERLESS_VISION_MODEL` | `Qwen/Qwen3-VL-30B-A3B-Instruct` | Uploaded diagrams |
 | `FEATHERLESS_BASE_URL` | `https://api.featherless.ai/v1` | OpenAI-compatible provider URL |
@@ -137,8 +140,9 @@ Optional variables:
 | `NETLIFY_AI_MODEL` | `gpt-5.4-mini` | Netlify AI Gateway text model override |
 | `NETLIFY_AI_VISION_MODEL` | text-model value | Netlify AI Gateway vision override |
 
-On eligible Netlify deployments, the runtime can use the injected
-`OPENAI_API_KEY` and `OPENAI_BASE_URL` without exposing them to the browser.
+The runtime recognizes `GEMINI_API_KEY` or `FEATHERLESS_API_KEY` directly. On
+eligible Netlify deployments it can instead use injected `OPENAI_API_KEY` and
+`OPENAI_BASE_URL`, without exposing any provider key to the browser.
 
 ## Honest offline demo
 

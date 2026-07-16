@@ -16,11 +16,14 @@ export interface FeatherlessConfig {
 }
 
 export const DEFAULT_BASE_URL = "https://api.featherless.ai/v1";
+export const DEFAULT_GEMINI_BASE_URL =
+  "https://generativelanguage.googleapis.com/v1beta/openai";
 export const DEFAULT_TIMEOUT_MS = 20_000;
 
 /** Documented defaults; override with FEATHERLESS_TEXT_MODEL / _VISION_MODEL. */
 export const DEFAULT_TEXT_MODEL = "Qwen/Qwen3-32B";
 export const DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct";
+export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 export const DEFAULT_NETLIFY_GATEWAY_MODEL = "gpt-5.4-mini";
 
 /**
@@ -34,16 +37,18 @@ export function assertServerOnly(): void {
 }
 
 /**
- * Featherless remains the explicit provider when configured. On Netlify,
- * OPENAI_API_KEY + OPENAI_BASE_URL are injected automatically by AI Gateway,
- * so deployed builds get real model inference without a checked-in secret.
- * Returns null only when neither provider is available.
+ * Explicit provider credentials take priority over Netlify AI Gateway.
+ * Gemini's OpenAI-compatible endpoint lets it share the same validated client
+ * pipeline as Featherless. On Netlify, OPENAI_API_KEY + OPENAI_BASE_URL may
+ * also be injected automatically by AI Gateway. Returns null only when none
+ * of these providers is available.
  */
 export function getFeatherlessConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): FeatherlessConfig | null {
   assertServerOnly();
   const featherlessApiKey = env.FEATHERLESS_API_KEY?.trim();
+  const geminiApiKey = env.GEMINI_API_KEY?.trim();
   const netlifyApiKey = env.OPENAI_API_KEY?.trim();
   const netlifyBaseUrl = env.OPENAI_BASE_URL?.trim();
 
@@ -62,6 +67,22 @@ export function getFeatherlessConfig(
         /\/+$/,
         "",
       ),
+      timeoutMs,
+      maxTokensParameter: "max_tokens",
+      supportsTemperature: true,
+    };
+  }
+
+  if (geminiApiKey) {
+    const geminiModel =
+      env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+    return {
+      apiKey: geminiApiKey,
+      textModel: geminiModel,
+      visionModel: env.GEMINI_VISION_MODEL?.trim() || geminiModel,
+      baseUrl: (
+        env.GEMINI_BASE_URL?.trim() || DEFAULT_GEMINI_BASE_URL
+      ).replace(/\/+$/, ""),
       timeoutMs,
       maxTokensParameter: "max_tokens",
       supportsTemperature: true,
