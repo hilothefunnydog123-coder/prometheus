@@ -174,13 +174,43 @@ export function questionAlignmentErrors(
   ).map((token) =>
     token.length > 5 && token.endsWith("s") ? token.slice(0, -1) : token,
   );
-  const matchingTokens = topicTokens.filter((token) => text.includes(token));
+  const matchingTokens = topicTokens.filter((token) =>
+    matchesTopicToken(text, token),
+  );
   const requiredMatches = Math.min(2, topicTokens.length);
   if (requiredMatches > 0 && matchingTokens.length < requiredMatches) {
+    // The repair round can only fix what it can see: name the exact terms.
+    // (These are single sanitized words from the learner's question — the
+    // model already has the full question; logs keep only the code prefix.)
+    const missing = topicTokens.filter(
+      (token) => !matchingTokens.includes(token),
+    );
     errors.push(
-      "learner-facing text must name the specific concepts from sourceQuestion",
+      `alignment.topic-terms: learner-facing text (title, objective, prediction, misconception) must reuse the question's key words; missing: ${missing.join(", ")}`,
     );
   }
 
   return errors;
+}
+
+/**
+ * A topic token counts as covered when the text contains it verbatim or
+ * shares its stem — "heavier" must accept "heavy"/"heaviest", "faster" must
+ * accept "fast". Deterministic suffix stripping only; no fuzzy matching.
+ */
+const STEM_SUFFIXES = ["iest", "ier", "est", "ing", "ed", "er", "ly", "s"];
+
+function stemToken(token: string): string {
+  for (const suffix of STEM_SUFFIXES) {
+    if (token.length - suffix.length >= 4 && token.endsWith(suffix)) {
+      return token.slice(0, -suffix.length);
+    }
+  }
+  return token;
+}
+
+function matchesTopicToken(text: string, token: string): boolean {
+  if (text.includes(token)) return true;
+  const stem = stemToken(token);
+  return stem !== token && text.includes(stem);
 }

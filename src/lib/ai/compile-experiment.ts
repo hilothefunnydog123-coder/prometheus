@@ -21,6 +21,7 @@ import {
   repairPrompt,
   wrapUntrusted,
 } from "./prompts";
+import { normalizeGeneratedSpec } from "./normalize-spec";
 import { validateRendererExperimentSpec } from "./validation";
 import { closestValidatedExample } from "./validated-examples";
 import { questionAlignmentErrors } from "./question-alignment";
@@ -121,7 +122,11 @@ function parseAndValidate(
       errors: ["tool arguments were not valid JSON; emit strict JSON only"],
     };
   }
-  const result = validateRendererExperimentSpec(candidate);
+  // Canonicalize the mechanically-fixable cross-field rules (testChange
+  // placement, control/scene agreement) before judging the model's output.
+  const result = validateRendererExperimentSpec(
+    normalizeGeneratedSpec(candidate),
+  );
   if (!result.ok) return { errors: result.errors };
   const alignmentErrors = sourceQuestion
     ? questionAlignmentErrors(result.spec, sourceQuestion)
@@ -131,6 +136,25 @@ function parseAndValidate(
     : { errors: alignmentErrors };
 }
 
+/**
+ * Safe server-side diagnostics (AI_COMPILER_DIAGNOSIS.md fix #1): log the
+ * validator error paths / alignment codes and the fallback reason so a
+ * production failure is attributable from hosting logs. Never logs the API
+ * key, learner prompt, provider response body, or generated learner text —
+ * only the part of each error before the first colon (a field path or an
+ * `alignment.<code>` tag).
+ */
+function errorPathOf(error: string): string {
+  return error.split(":", 1)[0]!.trim();
+}
+
+function logCompileDiagnostic(
+  event: "validation-failed" | "fallback",
+  detail: Record<string, unknown>,
+): void {
+  console.warn(`[compile] ${event} ${JSON.stringify(detail)}`);
+}
+
 function fixtureOrThrow(
   intent: LearningIntent,
   options: CompileOptions,
@@ -138,6 +162,7 @@ function fixtureOrThrow(
   reason: CompileFallbackReason,
   error: Error,
 ): CompileResponse {
+  logCompileDiagnostic("fallback", { reason });
   if (deps.fallbackMode === "error") throw error;
   return fixtureResponse(intent, options.gradeBand, reason);
 }
@@ -232,6 +257,11 @@ export async function compileExperiment(
         };
       }
       lastErrors = outcome.errors;
+      logCompileDiagnostic("validation-failed", {
+        phase,
+        model: config.textModel,
+        errorPaths: outcome.errors.map(errorPathOf),
+      });
     } catch (error) {
       if (error instanceof ModelOutputError) {
         lastErrors = [

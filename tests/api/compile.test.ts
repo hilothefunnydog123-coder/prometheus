@@ -136,6 +136,52 @@ describe("POST /api/compile", () => {
     );
   });
 
+  it("compiles the production regression prompt (heavier/faster stems + normalization)", async () => {
+    // Exact reproduction from AI_COMPILER_DIAGNOSIS.md: this prompt fell back
+    // to a validated example even with working credentials, because the
+    // generated wording used stem variants of the learner's terms and the
+    // spec carried mechanical testChange/control mistakes.
+    vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
+    const generated = structuredClone(dropDemo);
+    generated.id = "heavier-objects-lab";
+    generated.title = "Does A Heavy Ball Fall Fast?";
+    generated.objective =
+      "Test whether the heavy sphere lands before the light one.";
+    generated.misconception = {
+      ...generated.misconception,
+      title: "Heavy means quick",
+      description:
+        "Weight increases the pull of gravity, but inertia grows in the same proportion, so the fall is not quicker.",
+    };
+    generated.prediction.testChange = {
+      targetPath: "scene.objects.0.mass",
+      value: 16,
+    };
+    generated.controls[0] = {
+      ...generated.controls[0]!,
+      min: 0.05,
+      max: 500,
+      step: 3,
+      value: 5,
+    };
+    const stub = createFetchStub([
+      toolCallResponse("emit_experiment_spec", generated),
+    ]);
+    vi.stubGlobal("fetch", stub.fetchImpl);
+
+    const response = await POST(
+      multipartRequest({
+        prompt: "Why don't heavier objects fall faster",
+        gradeBand: "8-10",
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as CompileResponse;
+    expect(body.provenance.source).toBe("generated");
+    expect(body.warnings).toEqual([]);
+    expect(stub.calls).toHaveLength(1);
+  });
+
   it("caches only generated responses for identical compile requests", async () => {
     vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
     const stub = createFetchStub([

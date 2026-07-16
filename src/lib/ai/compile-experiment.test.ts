@@ -48,7 +48,50 @@ const invalidSpec = (() => {
   return spec;
 })();
 
+/** Physically sound output carrying the mechanical bookkeeping mistakes from
+ *  the production diagnosis (AI_COMPILER_DIAGNOSIS.md): base testChange on a
+ *  drop, mismatched counterfactual testChange, and drifted controls. */
+const sloppyButSoundSpec = (() => {
+  const spec = structuredClone(modelSpec);
+  spec.prediction.testChange = {
+    targetPath: "scene.objects.0.mass",
+    value: 16,
+  };
+  spec.counterfactuals[0]!.prediction.testChange = {
+    targetPath: "scene.height",
+    value: 4,
+  };
+  spec.controls[0] = {
+    ...spec.controls[0]!,
+    min: 0.05,
+    max: 500, // exceeds the mass bound of 100
+    step: 3, // scene value 8 is not on this grid from min
+    value: 5, // disagrees with scene.objects.0.mass = 8
+  };
+  return spec;
+})();
+
 describe("compileExperiment", () => {
+  it("normalizes mechanical bookkeeping mistakes without spending the repair round", async () => {
+    const stub = createFetchStub([
+      toolCallResponse("emit_experiment_spec", sloppyButSoundSpec),
+    ]);
+    const result = await compileExperiment(intent(), { gradeBand: "8-10" }, {
+      env: liveEnv,
+      fetchImpl: stub.fetchImpl,
+    });
+    expect(result.provenance.source).toBe("generated");
+    expect(result.warnings).toEqual([]); // succeeded on the first attempt
+    expect(stub.calls).toHaveLength(1); // no repair round consumed
+    expect(result.spec.prediction.testChange).toBeUndefined();
+    expect(result.spec.counterfactuals[0]!.prediction.testChange).toEqual(
+      result.spec.counterfactuals[0]!.change,
+    );
+    const control = result.spec.controls[0]!;
+    expect(control.value).toBe(8); // snapped to the scene value
+    expect(control.max).toBeLessThanOrEqual(100);
+  });
+
   it("falls back to the family fixture with a disclosed warning when credentials are missing", async () => {
     const stub = createFetchStub([]);
     const result = await compileExperiment(

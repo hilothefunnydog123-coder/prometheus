@@ -72,4 +72,42 @@ describe("questionAlignmentErrors", () => {
       ).join(" "),
     ).toContain("launch angle");
   });
+
+  it("accepts stem variants of the question's key words (heavier/heavy, faster/fast)", () => {
+    // Production regression (AI_COMPILER_DIAGNOSIS.md): "Why don't heavier
+    // objects fall faster" was rejected when the generated text used
+    // "heavy"/"fast" instead of the exact inflections.
+    const spec = structuredClone(dropDemo);
+    spec.title = "Does A Heavy Ball Fall Fast?";
+    spec.objective =
+      "Test whether the heavy sphere reaches the ground before the light one.";
+    // Ensure no learner-facing field contains the exact inflections, so this
+    // test fails without stem matching.
+    spec.misconception = {
+      ...spec.misconception,
+      title: "Heavy means quick",
+      description:
+        "Weight increases the pull of gravity, but inertia grows in the same proportion, so the fall is not quicker.",
+    };
+    const text = JSON.stringify(spec).toLowerCase();
+    expect(text).not.toContain("heavier");
+    expect(text).not.toContain("faster");
+    expect(
+      questionAlignmentErrors(spec, "Why don't heavier objects fall faster"),
+    ).toEqual([]);
+  });
+
+  it("names the missing key terms so the repair round can fix them", () => {
+    const spec = structuredClone(dropDemo);
+    const errors = questionAlignmentErrors(
+      spec,
+      "What happens with magnetism and buoyancy here?",
+    );
+    const topicError = errors.find((error) =>
+      error.startsWith("alignment.topic-terms:"),
+    );
+    expect(topicError).toBeDefined();
+    expect(topicError).toContain("magnetism");
+    expect(topicError).toContain("buoyancy");
+  });
 });
