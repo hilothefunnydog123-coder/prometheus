@@ -44,8 +44,9 @@ describe("getFeatherlessConfig", () => {
       baseUrl: DEFAULT_GEMINI_BASE_URL,
       textModel: DEFAULT_GEMINI_MODEL,
       visionModel: DEFAULT_GEMINI_MODEL,
-      maxTokensParameter: "max_tokens",
-      supportsTemperature: true,
+      maxTokensParameter: null,
+      supportsTemperature: false,
+      toolChoiceMode: "auto",
     });
   });
 

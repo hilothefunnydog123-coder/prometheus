@@ -84,6 +84,23 @@ describe("chatCompletion", () => {
     expect(stub.calls[0]!.body.temperature).toBeUndefined();
   });
 
+  it("uses Gemini-compatible automatic tools without optional generation fields", async () => {
+    const geminiConfig: FeatherlessConfig = {
+      ...config,
+      maxTokensParameter: null,
+      supportsTemperature: false,
+      toolChoiceMode: "auto",
+    };
+    const stub = createFetchStub([
+      toolCallResponse("some_tool", { hello: "gemini" }),
+    ]);
+    await chatCompletion(geminiConfig, { ...request, tool }, stub.fetchImpl);
+    expect(stub.calls[0]!.body.tool_choice).toBe("auto");
+    expect(stub.calls[0]!.body.max_tokens).toBeUndefined();
+    expect(stub.calls[0]!.body.max_completion_tokens).toBeUndefined();
+    expect(stub.calls[0]!.body.temperature).toBeUndefined();
+  });
+
   it("returns non-empty assistant text when no tool is requested", async () => {
     const stub = createFetchStub([textResponse("plain answer")]);
     const result = await chatCompletion(config, request, stub.fetchImpl);

@@ -201,8 +201,10 @@ async function chatCompletionOnce(
   const body: Record<string, unknown> = {
     model: request.model,
     messages: request.messages,
-    [config.maxTokensParameter]: request.maxTokens ?? 1600,
   };
+  if (config.maxTokensParameter) {
+    body[config.maxTokensParameter] = request.maxTokens ?? 1600;
+  }
   if (config.supportsTemperature) {
     body.temperature = request.temperature ?? 0.2;
   }
@@ -217,10 +219,13 @@ async function chatCompletionOnce(
         },
       },
     ];
-    body.tool_choice = {
-      type: "function",
-      function: { name: request.tool.name },
-    };
+    body.tool_choice =
+      config.toolChoiceMode === "auto"
+        ? "auto"
+        : {
+            type: "function",
+            function: { name: request.tool.name },
+          };
   }
 
   try {
