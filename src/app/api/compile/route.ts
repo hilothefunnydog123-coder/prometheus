@@ -7,6 +7,11 @@ import {
 } from "@/lib/ai/analyze-input";
 import { compileExperiment } from "@/lib/ai/compile-experiment";
 import { escapeHtml } from "@/lib/ai/errors";
+import {
+  RATE_LIMITS,
+  clientKeyFromRequest,
+  createRateLimiter,
+} from "@/lib/api/rate-limit";
 
 /**
  * POST /api/compile — multipart/form-data
@@ -25,6 +30,10 @@ export const runtime = "nodejs";
 const MAX_TEXT_LENGTH = 2000;
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const MAX_REQUEST_BYTES = 6 * 1024 * 1024;
+
+// Per-instance, in-memory: resets on redeploy, which is fine for the
+// hackathon deployment shape (single server process).
+const limiter = createRateLimiter(RATE_LIMITS.compile);
 
 function errorResponse(
   status: number,
@@ -46,6 +55,17 @@ function isSupportedImageMime(
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const decision = limiter.check(clientKeyFromRequest(request));
+  if (!decision.allowed) {
+    const response = errorResponse(
+      429,
+      "rate_limited",
+      "Too many requests. Try again shortly.",
+    );
+    response.headers.set("Retry-After", String(decision.retryAfterSeconds));
+    return response;
+  }
+
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().includes("multipart/form-data")) {
     return errorResponse(

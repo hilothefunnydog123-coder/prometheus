@@ -6,6 +6,11 @@ import {
 } from "@/lib/ai/contracts/experiment-spec";
 import { escapeHtml } from "@/lib/ai/errors";
 import { evaluateExplanation } from "@/lib/ai/evaluate-explanation";
+import {
+  RATE_LIMITS,
+  clientKeyFromRequest,
+  createRateLimiter,
+} from "@/lib/api/rate-limit";
 
 /**
  * POST /api/evaluate — application/json
@@ -25,6 +30,10 @@ import { evaluateExplanation } from "@/lib/ai/evaluate-explanation";
 export const runtime = "nodejs";
 
 const MAX_BODY_BYTES = 64 * 1024;
+
+// Per-instance, in-memory: resets on redeploy, which is fine for the
+// hackathon deployment shape (single server process).
+const limiter = createRateLimiter(RATE_LIMITS.evaluate);
 
 const evaluateRequestSchema = z
   .object({
@@ -51,6 +60,17 @@ function errorResponse(
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const decision = limiter.check(clientKeyFromRequest(request));
+  if (!decision.allowed) {
+    const response = errorResponse(
+      429,
+      "rate_limited",
+      "Too many requests. Try again shortly.",
+    );
+    response.headers.set("Retry-After", String(decision.retryAfterSeconds));
+    return response;
+  }
+
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().includes("application/json")) {
     return errorResponse(

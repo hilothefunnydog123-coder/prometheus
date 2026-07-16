@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/evaluate/route";
+import { RATE_LIMITS } from "@/lib/api/rate-limit";
 import * as bkt from "@/lib/mastery/bkt";
 import {
   createFetchStub,
@@ -170,5 +171,28 @@ describe("POST /api/evaluate", () => {
     );
     const body = (await response.json()) as ErrorBody;
     expect(body.error.message).not.toMatch(/[<>]/);
+  });
+
+  it("rate limits a single client with 429 + Retry-After", async () => {
+    // Dedicated forwarded IP: the route limiter is module-scoped, so this
+    // test must not drain the shared "anonymous" bucket other tests use.
+    const requestFromLimitedClient = () =>
+      new Request("http://test.local/api/evaluate", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": "192.0.2.99",
+        },
+        body: JSON.stringify(validPayload),
+      });
+    for (let i = 0; i < RATE_LIMITS.evaluate.limit; i += 1) {
+      const response = await POST(requestFromLimitedClient());
+      expect(response.status).toBe(200);
+    }
+    const denied = await POST(requestFromLimitedClient());
+    expect(denied.status).toBe(429);
+    expect(Number(denied.headers.get("Retry-After"))).toBeGreaterThanOrEqual(1);
+    const body = (await denied.json()) as ErrorBody;
+    expect(body.error.code).toBe("rate_limited");
   });
 });
