@@ -171,6 +171,49 @@ describe("compileExperiment", () => {
     expect(result.warnings.join(" ")).toContain("timed out");
   });
 
+  it("shares one timeout budget with the repair attempt", async () => {
+    let calls = 0;
+    const fetchImpl = ((
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      calls += 1;
+      if (calls === 1) {
+        return new Promise<Response>((resolve) => {
+          setTimeout(
+            () =>
+              resolve(
+                toolCallResponse(
+                  "emit_experiment_spec",
+                  "{definitely not json",
+                ),
+              ),
+            70,
+          );
+        });
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("The operation was aborted.", "AbortError")),
+        );
+      });
+    }) as typeof fetch;
+
+    const startedAt = Date.now();
+    const result = await compileExperiment(
+      intent(),
+      { gradeBand: "8-10" },
+      {
+        env: { ...liveEnv, FEATHERLESS_TIMEOUT_MS: "100" },
+        fetchImpl,
+      },
+    );
+    expect(result.provenance.source).toBe("validated-example");
+    expect(result.warnings.join(" ")).toContain("timed out");
+    expect(Date.now() - startedAt).toBeLessThan(220);
+    expect(calls).toBe(2);
+  });
+
   it("falls back after one transient retry without a model repair", async () => {
     const stub = createFetchStub([
       jsonResponse({ error: "provider-body-secret" }, 500),

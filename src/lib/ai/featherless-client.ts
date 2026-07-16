@@ -73,6 +73,16 @@ const TRANSIENT_HTTP_STATUSES: ReadonlySet<number> = new Set([
 export const TRANSIENT_RETRY_DELAY_MS = 250;
 const MAX_PROVIDER_ATTEMPTS = 2;
 
+function normalizedTimeoutMs(
+  config: FeatherlessConfig,
+  requestedTimeout?: number,
+): number {
+  const timeout = requestedTimeout ?? config.timeoutMs;
+  return Number.isFinite(timeout) && timeout > 0
+    ? Math.min(timeout, 120_000)
+    : config.timeoutMs;
+}
+
 function waitForRetry(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
     return Promise.reject(new ProviderCancelledError());
@@ -152,9 +162,23 @@ export async function chatCompletion(
     throw new ProviderCancelledError();
   }
 
+  // Treat the timeout as a budget for the whole operation, including a
+  // transient retry. Otherwise two slow attempts can outlive the hosting
+  // function even though each attempt individually respects the timeout.
+  const timeoutBudgetMs = normalizedTimeoutMs(config, request.timeoutMs);
+  const deadline = Date.now() + timeoutBudgetMs;
+
   for (let attempt = 1; ; attempt += 1) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new ProviderTimeoutError(timeoutBudgetMs);
+    }
     try {
-      return await chatCompletionOnce(config, request, fetchImpl);
+      return await chatCompletionOnce(
+        config,
+        { ...request, timeoutMs: remainingMs },
+        fetchImpl,
+      );
     } catch (error) {
       if (request.signal?.aborted) {
         throw new ProviderCancelledError();
@@ -165,7 +189,14 @@ export async function chatCompletion(
       if (!transient || attempt >= MAX_PROVIDER_ATTEMPTS) {
         throw error;
       }
-      await waitForRetry(TRANSIENT_RETRY_DELAY_MS, request.signal);
+      const retryBudgetMs = deadline - Date.now();
+      if (retryBudgetMs <= 0) {
+        throw new ProviderTimeoutError(timeoutBudgetMs);
+      }
+      await waitForRetry(
+        Math.min(TRANSIENT_RETRY_DELAY_MS, retryBudgetMs),
+        request.signal,
+      );
     }
   }
 }
@@ -179,11 +210,7 @@ async function chatCompletionOnce(
     throw new ProviderCancelledError();
   }
 
-  const requestedTimeout = request.timeoutMs ?? config.timeoutMs;
-  const timeoutMs =
-    Number.isFinite(requestedTimeout) && requestedTimeout > 0
-      ? Math.min(requestedTimeout, 120_000)
-      : config.timeoutMs;
+  const timeoutMs = normalizedTimeoutMs(config, request.timeoutMs);
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {

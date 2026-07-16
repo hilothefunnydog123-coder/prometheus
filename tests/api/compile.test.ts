@@ -116,13 +116,6 @@ describe("POST /api/compile", () => {
   it("returns generated provenance when the provider succeeds", async () => {
     vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
     const stub = createFetchStub([
-      toolCallResponse("report_learning_intent", {
-        topic: "pendulum periods",
-        family: "pendulum",
-        concepts: ["pendulum-period"],
-        difficulty: "standard",
-        confidence: 0.9,
-      }),
       toolCallResponse("emit_experiment_spec", pendulumFixture),
     ]);
     vi.stubGlobal("fetch", stub.fetchImpl);
@@ -137,8 +130,8 @@ describe("POST /api/compile", () => {
     const body = (await response.json()) as CompileResponse;
     expect(body.provenance.source).toBe("generated");
     expect(body.provenance.model).toBeTruthy();
-    expect(stub.calls).toHaveLength(2);
-    expect(JSON.stringify(stub.calls[1]!.body)).toContain(
+    expect(stub.calls).toHaveLength(1);
+    expect(JSON.stringify(stub.calls[0]!.body)).toContain(
       "teach me about pendulum periods",
     );
   });
@@ -146,13 +139,6 @@ describe("POST /api/compile", () => {
   it("caches only generated responses for identical compile requests", async () => {
     vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
     const stub = createFetchStub([
-      toolCallResponse("report_learning_intent", {
-        topic: "pendulum periods",
-        family: "pendulum",
-        concepts: ["pendulum-period"],
-        difficulty: "standard",
-        confidence: 0.9,
-      }),
       toolCallResponse("emit_experiment_spec", pendulumFixture),
     ]);
     vi.stubGlobal("fetch", stub.fetchImpl);
@@ -166,7 +152,7 @@ describe("POST /api/compile", () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     expect(await second.json()).toEqual(await first.json());
-    expect(stub.calls).toHaveLength(2);
+    expect(stub.calls).toHaveLength(1);
   });
 
   it("does not cache validated-example fallbacks", async () => {
@@ -188,13 +174,6 @@ describe("POST /api/compile", () => {
   it("repairs a generic fixture until it matches a terminal-velocity question", async () => {
     vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
     const stub = createFetchStub([
-      toolCallResponse("report_learning_intent", {
-        topic: "air resistance and terminal velocity",
-        family: "drop",
-        concepts: ["terminal-velocity", "quadratic-drag"],
-        difficulty: "standard",
-        confidence: 0.98,
-      }),
       toolCallResponse("emit_experiment_spec", dropDemo),
       toolCallResponse("emit_experiment_spec", terminalVelocitySpec),
     ]);
@@ -212,22 +191,14 @@ describe("POST /api/compile", () => {
     expect(body.spec.scene.family).toBe("drop");
     expect(body.provenance.source).toBe("generated");
     expect(body.warnings.join(" ")).toContain("automatic correction");
-    expect(JSON.stringify(stub.calls[2]!.body)).toContain(
+    expect(JSON.stringify(stub.calls[1]!.body)).toContain(
       "non-zero air density",
     );
   });
 
   it("returns 422 with the supported families for unsupported material", async () => {
     vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
-    const stub = createFetchStub([
-      toolCallResponse("report_learning_intent", {
-        topic: "chemical equations",
-        family: "unknown",
-        concepts: [],
-        difficulty: "standard",
-        confidence: 0.98,
-      }),
-    ]);
+    const stub = createFetchStub([]);
     vi.stubGlobal("fetch", stub.fetchImpl);
     const response = await POST(
       multipartRequest({
@@ -241,6 +212,7 @@ describe("POST /api/compile", () => {
     for (const family of ["drop", "projectile", "pendulum"]) {
       expect(body.error.message).toContain(family);
     }
+    expect(stub.calls).toHaveLength(0);
     expect(body.error.message).not.toMatch(/[<>]/);
   });
 

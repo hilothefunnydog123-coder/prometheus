@@ -34,7 +34,9 @@ This is not another chatbot or quiz generator:
 The compiler treats learner text, uploaded images, and text depicted inside an
 image as untrusted data.
 
-1. `analyzeInput` maps the question to drop, projectile, pendulum, or unsupported.
+1. A deterministic text router maps typed questions to drop, projectile,
+   pendulum, or unsupported. `analyzeInput` uses the vision model only when a
+   diagram is attached.
 2. `compileExperiment` sends the exact source question through a forced JSON tool
    call and validates the returned declarative `ExperimentSpec`.
 3. Validation enforces schemas, numeric bounds, safe scene paths, content rules,
@@ -81,7 +83,7 @@ families instead of a fabricated simulation.
 
 ```mermaid
 flowchart TD
-    Q["Learner question or diagram<br/>untrusted input"] --> A["Intent analysis<br/>text or vision model"]
+    Q["Learner question or diagram<br/>untrusted input"] --> A["Intent analysis<br/>deterministic text router or vision model"]
     A --> C["Structured experiment compiler<br/>forced tool call"]
     C --> V["Schema + safety + question-alignment validation"]
     V -- invalid --> R["Exactly one repair"] --> V
@@ -130,10 +132,10 @@ Optional variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `GEMINI_MODEL` | `gemini-3.5-flash` | Gemini text routing, compilation, grading, and default vision model |
+| `GEMINI_MODEL` | `gemini-3.1-flash-lite` | Low-latency Gemini compilation, grading, and default vision model |
 | `GEMINI_VISION_MODEL` | text-model value | Gemini uploaded-diagram model override |
 | `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai` | Gemini OpenAI-compatible provider URL |
-| `GEMINI_TIMEOUT_MS` | `60000` | Gemini request timeout, capped at 120 seconds |
+| `GEMINI_TIMEOUT_MS` | `25000` | Gemini request timeout, capped at 120 seconds; keep below the hosting request deadline |
 | `FEATHERLESS_TEXT_MODEL` | `Qwen/Qwen3-32B` | Text routing, compilation, and grading |
 | `FEATHERLESS_VISION_MODEL` | `Qwen/Qwen3-VL-30B-A3B-Instruct` | Uploaded diagrams |
 | `FEATHERLESS_BASE_URL` | `https://api.featherless.ai/v1` | OpenAI-compatible provider URL |

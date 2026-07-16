@@ -20,12 +20,12 @@ export const DEFAULT_BASE_URL = "https://api.featherless.ai/v1";
 export const DEFAULT_GEMINI_BASE_URL =
   "https://generativelanguage.googleapis.com/v1beta/openai";
 export const DEFAULT_TIMEOUT_MS = 20_000;
-export const DEFAULT_GEMINI_TIMEOUT_MS = 60_000;
+export const DEFAULT_GEMINI_TIMEOUT_MS = 25_000;
 
 /** Documented defaults; override with FEATHERLESS_TEXT_MODEL / _VISION_MODEL. */
 export const DEFAULT_TEXT_MODEL = "Qwen/Qwen3-32B";
 export const DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct";
-export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
+export const DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
 export const DEFAULT_NETLIFY_GATEWAY_MODEL = "gpt-5.4-mini";
 
 /**

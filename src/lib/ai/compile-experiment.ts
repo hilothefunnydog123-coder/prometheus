@@ -166,6 +166,10 @@ export async function compileExperiment(
       new MissingCredentialsError(),
     );
   }
+  // The configured timeout is a budget for the full compiler, including its
+  // optional repair pass. Keeping one shared deadline prevents two individually
+  // valid model calls from exceeding the hosting function's request limit.
+  const deadline = Date.now() + config.timeoutMs;
 
   const sourceQuestion = options.sourceQuestion?.trim();
   const request = {
@@ -181,6 +185,16 @@ export async function compileExperiment(
   let lastErrors: string[] = [];
 
   for (const phase of ["initial", "repair"] as const) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      return fixtureOrThrow(
+        intent,
+        options,
+        deps,
+        "timeout",
+        new ProviderTimeoutError(config.timeoutMs),
+      );
+    }
     if (phase === "repair") {
       messages.push({ role: "user", content: repairPrompt(lastErrors) });
     }
@@ -192,6 +206,7 @@ export async function compileExperiment(
           messages,
           tool: EMIT_EXPERIMENT_SPEC_TOOL,
           maxTokens: 3000,
+          timeoutMs: remainingMs,
           signal: deps.signal,
         },
         deps.fetchImpl,

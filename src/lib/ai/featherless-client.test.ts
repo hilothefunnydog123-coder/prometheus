@@ -143,6 +143,36 @@ describe("chatCompletion", () => {
     expect(stub.calls).toHaveLength(2);
   });
 
+  it("applies one timeout budget across transient retries", async () => {
+    let calls = 0;
+    const fetchImpl = ((
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      calls += 1;
+      if (calls === 1) {
+        return new Promise<Response>((resolve) => {
+          setTimeout(
+            () => resolve(jsonResponse({ error: "busy" }, 503)),
+            70,
+          );
+        });
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("The operation was aborted.", "AbortError")),
+        );
+      });
+    }) as typeof fetch;
+
+    const startedAt = Date.now();
+    await expect(
+      chatCompletion(config, { ...request, timeoutMs: 100 }, fetchImpl),
+    ).rejects.toBeInstanceOf(ProviderTimeoutError);
+    expect(Date.now() - startedAt).toBeLessThan(220);
+    expect(calls).toBe(1);
+  });
+
   it("does not retry non-transient HTTP errors", async () => {
     const stub = createFetchStub([jsonResponse({ error: "bad request" }, 400)]);
     await expect(

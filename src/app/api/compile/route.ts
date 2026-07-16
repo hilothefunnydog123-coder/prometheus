@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { gradeBandSchema, type GradeBand } from "@/lib/contracts/experiment";
 import {
   analyzeInput,
+  heuristicIntent,
   SUPPORTED_IMAGE_MIME_TYPES,
   type ImageInput,
   type SupportedImageMimeType,
@@ -263,9 +264,13 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json(cached, { status: 200 });
     }
 
-    const intent = await analyzeInput(prompt, image, {
-      signal: request.signal,
-    });
+    // Text questions can be routed deterministically from the three supported
+    // mechanics families. Reserve the model-backed analyzer for diagrams,
+    // where visual context is necessary. This keeps normal requests to one
+    // provider call so they finish within the hosting function's time limit.
+    const intent = image
+      ? await analyzeInput(prompt, image, { signal: request.signal })
+      : heuristicIntent(prompt, false);
     if (intent.family === "unknown") {
       return errorResponse(
         422,
