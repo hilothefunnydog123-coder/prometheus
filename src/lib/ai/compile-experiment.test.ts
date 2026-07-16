@@ -185,6 +185,24 @@ describe("compileExperiment", () => {
     expect(stub.calls).toHaveLength(2);
   });
 
+  it.each([
+    [400, "request format"],
+    [401, "API key or permissions"],
+    [403, "API key or permissions"],
+    [404, "model is unavailable"],
+  ])("reports a safe provider category for HTTP %i", async (status, warning) => {
+    const stub = createFetchStub([
+      jsonResponse({ error: "provider-body-secret" }, status),
+    ]);
+    const result = await compileExperiment(intent(), { gradeBand: "8-10" }, {
+      env: liveEnv,
+      fetchImpl: stub.fetchImpl,
+    });
+    expect(result.provenance.source).toBe("validated-example");
+    expect(result.warnings.join(" ")).toContain(warning);
+    expect(JSON.stringify(result)).not.toContain("provider-body-secret");
+  });
+
   it("discloses network and rate-limit fallback reasons without provider details", async () => {
     const cases = [
       {

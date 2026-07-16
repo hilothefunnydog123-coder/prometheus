@@ -43,6 +43,9 @@ export type CompileFallbackReason =
   | "cancelled"
   | "network-error"
   | "rate-limited"
+  | "provider-auth-error"
+  | "provider-request-error"
+  | "provider-model-error"
   | "provider-error"
   | "invalid-after-repair";
 
@@ -52,6 +55,12 @@ const FALLBACK_PHRASES: Record<CompileFallbackReason, string> = {
   cancelled: "The AI compiler request was cancelled.",
   "network-error": "The AI compiler could not reach its provider.",
   "rate-limited": "The AI compiler is busy right now.",
+  "provider-auth-error":
+    "The AI provider rejected its API key or permissions.",
+  "provider-request-error":
+    "The AI provider rejected the request format.",
+  "provider-model-error":
+    "The configured AI model is unavailable for this API key.",
   "provider-error": "The AI compiler is temporarily unavailable.",
   "invalid-after-repair":
     "The AI compiler could not produce a valid experiment for this request.",
@@ -248,11 +257,19 @@ export async function compileExperiment(
         error instanceof ProviderHttpError
           ? error
           : new ProviderHttpError(502);
+      const reason: CompileFallbackReason =
+        providerError.status === 400
+          ? "provider-request-error"
+          : providerError.status === 401 || providerError.status === 403
+            ? "provider-auth-error"
+            : providerError.status === 404
+              ? "provider-model-error"
+              : "provider-error";
       return fixtureOrThrow(
         intent,
         options,
         deps,
-        "provider-error",
+        reason,
         providerError,
       );
     }
