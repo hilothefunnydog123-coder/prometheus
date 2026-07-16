@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_GEMINI_MODEL,
+  DEFAULT_GEMINI_TIMEOUT_MS,
   DEFAULT_NETLIFY_GATEWAY_MODEL,
   getFeatherlessConfig,
 } from "./config";
@@ -47,6 +48,7 @@ describe("getFeatherlessConfig", () => {
       maxTokensParameter: null,
       supportsTemperature: false,
       toolChoiceMode: "auto",
+      timeoutMs: DEFAULT_GEMINI_TIMEOUT_MS,
     });
   });
 
@@ -57,11 +59,13 @@ describe("getFeatherlessConfig", () => {
       GEMINI_MODEL: "gemini-custom",
       GEMINI_VISION_MODEL: "gemini-vision-custom",
       GEMINI_BASE_URL: "https://gemini.example/openai/",
+      GEMINI_TIMEOUT_MS: "45000",
     });
     expect(config).toMatchObject({
       textModel: "gemini-custom",
       visionModel: "gemini-vision-custom",
       baseUrl: "https://gemini.example/openai",
+      timeoutMs: 45_000,
     });
   });
 
