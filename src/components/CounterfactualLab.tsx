@@ -31,7 +31,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   CompileResponse,
   EvaluationResponse,
@@ -203,6 +203,112 @@ function CompilerOverlay({ stage }: { stage: number }) {
   );
 }
 
+/** Scroll-reveal wrapper: fades and lifts its section into view once. */
+function Reveal({
+  className = "",
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") {
+      el.classList.add("in-view");
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("in-view");
+            observer.unobserve(entry.target);
+          }
+        }
+      },
+      { threshold: 0.12, rootMargin: "0px 0px -6% 0px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <section ref={ref} className={`reveal ${className}`.trim()}>
+      {children}
+    </section>
+  );
+}
+
+/** Count-up number that animates once when scrolled into view. */
+function CountUp({
+  to,
+  pad = 2,
+  duration = 1100,
+}: {
+  to: number;
+  pad?: number;
+  duration?: number;
+}) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const started = useRef(false);
+  const [value, setValue] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const reduce =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduce || typeof IntersectionObserver === "undefined") {
+      setValue(to);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting && !started.current) {
+            started.current = true;
+            const start = performance.now();
+            const tick = (now: number) => {
+              const progress = Math.min(1, (now - start) / duration);
+              const eased = 1 - Math.pow(1 - progress, 3);
+              setValue(Math.round(eased * to));
+              if (progress < 1) requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
+            observer.unobserve(entry.target);
+          }
+        }
+      },
+      { threshold: 0.55 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [to, duration]);
+  return <span ref={ref}>{String(value).padStart(pad, "0")}</span>;
+}
+
+const mechanismSteps = [
+  {
+    icon: LockKeyhole,
+    kicker: "STEP 01",
+    title: "Commit a prediction",
+    body: "Lock in what you think happens before anything moves. That friction is where a wrong intuition finally gets exposed.",
+  },
+  {
+    icon: Play,
+    kicker: "STEP 02",
+    title: "Run the real world",
+    body: "A deterministic 3D physics engine plays it out. Motion, measurements, and evidence charts stay perfectly in sync.",
+  },
+  {
+    icon: Lightbulb,
+    kicker: "STEP 03",
+    title: "Explain, then transfer",
+    body: "Say why it happened, get rubric feedback, then change one variable and predict again in a world that shifted.",
+  },
+];
+
 function Landing({
   prompt,
   setPrompt,
@@ -263,10 +369,19 @@ function Landing({
 
   return (
     <main className="landing">
+      <Reveal className="hero-shell">
+      <div className="hero-panel">
+      <div className="hero-grid" aria-hidden="true" />
       <div className="hero-orbit hero-orbit-a" />
       <div className="hero-orbit hero-orbit-b" />
-      <section className="hero-section">
+      <div className="hero-spark" aria-hidden="true"><i /><i /><i /><i /><i /></div>
+      <div className="hero-section">
         <div className="hero-copy">
+          <div className="hero-chip">
+            <span className="hero-chip-dot" aria-hidden="true" />
+            <span className="micro">LIVE PHYSICS ENGINE</span>
+            <span className="hero-chip-line">Deterministic. Every outcome is proven, never guessed.</span>
+          </div>
           <div className="hero-badge"><Zap size={13} /> AI-GENERATED INTERACTIVE PHYSICS</div>
           <h1>
             Don’t just learn
@@ -276,11 +391,6 @@ function Landing({
           <p className="hero-lede">
             Turn any mechanics question or textbook diagram into a living 3D experiment. Predict it. Run it. Prove it.
           </p>
-          <div className="impact-row">
-            <div><strong>03</strong><span>physics engines</span></div>
-            <div><strong>∞</strong><span>counterfactuals</span></div>
-            <div><strong>0</strong><span>answers handed to you</span></div>
-          </div>
         </div>
 
         <div className="prompt-console">
@@ -343,12 +453,36 @@ function Landing({
           )}
           <p className="privacy-note"><span /> Images are analyzed in memory and never saved.</p>
         </div>
-      </section>
+      </div>
+      </div>
+      </Reveal>
 
-      <section className="example-section">
+      <Reveal className="proof-strip">
+        <p className="micro proof-kicker">GRADED BY DETERMINISTIC PHYSICS · EVERY SINGLE RUN</p>
+        <div className="proof-stats">
+          <div className="proof-stat">
+            <strong><CountUp to={3} /></strong>
+            <span>physics engines</span>
+          </div>
+          <div className="proof-stat">
+            <strong><CountUp to={9} /></strong>
+            <span>proven outcomes</span>
+          </div>
+          <div className="proof-stat">
+            <strong>&infin;</strong>
+            <span>counterfactuals</span>
+          </div>
+          <div className="proof-stat">
+            <strong>0</strong>
+            <span>answers handed to you</span>
+          </div>
+        </div>
+      </Reveal>
+
+      <Reveal className="example-section">
         <div className="section-heading">
-          <div><p className="eyebrow">START WITH A PROVEN PARADOX</p><h2>Three worlds. One way of thinking.</h2></div>
-          <p>Every lab begins with a prediction—because seeing an answer is not the same as changing your mind.</p>
+          <div><p className="eyebrow">02 · START WITH A PROVEN PARADOX</p><h2>Three worlds. One way of thinking.</h2></div>
+          <p>Every lab begins with a prediction, because seeing an answer is not the same as changing your mind.</p>
         </div>
         <div className="example-grid">
           {exampleMeta.map(({ id, icon: Icon, kicker, question, spec }, index) => (
@@ -361,7 +495,47 @@ function Landing({
             </button>
           ))}
         </div>
-      </section>
+      </Reveal>
+
+      <Reveal className="mechanism-section">
+        <div className="section-heading">
+          <div><p className="eyebrow">03 · THE MECHANISM</p><h2>Predict. Run. Prove.</h2></div>
+          <p>No answer is ever handed to you. You earn it by testing the world, then breaking it on purpose.</p>
+        </div>
+        <div className="mechanism-grid">
+          {mechanismSteps.map(({ icon: Icon, kicker, title, body }) => (
+            <div key={kicker} className="mechanism-card">
+              <div className="mechanism-icon"><Icon size={19} strokeWidth={1.7} /></div>
+              <p className="micro">{kicker}</p>
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </div>
+          ))}
+        </div>
+      </Reveal>
+
+      <Reveal className="closing-shell">
+        <div className="closing-panel">
+          <div className="hero-grid" aria-hidden="true" />
+          <p className="eyebrow">04 · YOUR TURN</p>
+          <h2>Ask a question. Change the world. <em>Prove it.</em></h2>
+          <p className="closing-lede">
+            One question becomes a world you can rerun. The physics is deterministic, so what you learn is real.
+          </p>
+          <button
+            className="closing-cta"
+            onClick={() => {
+              const field = document.getElementById("experiment-question");
+              window.scrollTo({ top: 0, behavior: "smooth" });
+              if (field instanceof HTMLTextAreaElement) {
+                window.setTimeout(() => field.focus(), 360);
+              }
+            }}
+          >
+            Build my first world <ArrowRight size={17} />
+          </button>
+        </div>
+      </Reveal>
     </main>
   );
 }
