@@ -42,10 +42,104 @@ export const pendulumSceneSchema = z.object({
   bob: bodySchema,
 });
 
+/**
+ * Generic classical-mechanics sandbox. Instead of a fixed scenario, the model
+ * declares a set of point-mass bodies (spheres) in a 2D vertical plane and the
+ * forces acting on them: uniform gravity, quadratic air drag, Hooke springs,
+ * an inverse-square central attractor (orbits), a floor with restitution, and
+ * optional pairwise collisions. A single deterministic integrator
+ * (src/lib/physics/sandbox.ts) owns the truth: it produces the rendered
+ * trajectory, the evidence, and the graded outcome from the same math. The
+ * model never decides which prediction is correct — outcomeRule names a
+ * measurable quantity and the server computes it.
+ */
+
+/** Measurable scalar the outcome rule (and evidence metrics) may reference. */
+export const SANDBOX_METRICS = [
+  "time_to_floor",
+  "max_height",
+  "final_height",
+  "max_speed",
+  "final_speed",
+  "distance_traveled",
+  "horizontal_range",
+  "final_x",
+  "period",
+] as const;
+export type SandboxMetric = (typeof SANDBOX_METRICS)[number];
+
+const sandboxVector = (
+  xMin: number,
+  xMax: number,
+  yMin: number,
+  yMax: number,
+) =>
+  z.object({
+    x: boundedNumber(xMin, xMax),
+    y: boundedNumber(yMin, yMax),
+  });
+
+export const sandboxBodySchema = z.object({
+  id: z.string().min(1).max(40),
+  label: z.string().min(1).max(40),
+  mass: boundedNumber(0.05, 100),
+  radius: boundedNumber(0.05, 2),
+  dragCoefficient: boundedNumber(0, 2.5),
+  /** Immovable body: a wall, pivot, or the massive centre of an orbit. */
+  fixed: z.boolean(),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  position: sandboxVector(-30, 30, -30, 40),
+  velocity: sandboxVector(-40, 40, -40, 40),
+});
+
+export const sandboxSpringSchema = z.object({
+  id: z.string().min(1).max(40),
+  bodyA: z.string().min(1).max(40),
+  /** Other end: another body id, or null to anchor at the fixed point. */
+  bodyB: z.string().min(1).max(40).nullable(),
+  anchor: sandboxVector(-30, 30, -30, 40),
+  stiffness: boundedNumber(0, 200),
+  restLength: boundedNumber(0, 40),
+  damping: boundedNumber(0, 20),
+});
+
+export const sandboxOutcomeRuleSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("compare_bodies"),
+    metric: z.enum(SANDBOX_METRICS),
+    bodyA: z.string().min(1).max(40),
+    bodyB: z.string().min(1).max(40),
+    comparator: z.enum(["greater", "less"]),
+    tolerance: boundedNumber(0, 1000),
+  }),
+  z.object({
+    kind: z.literal("compare_change"),
+    metric: z.enum(SANDBOX_METRICS),
+    body: z.string().min(1).max(40),
+    tolerance: boundedNumber(0, 1000),
+  }),
+]);
+
+export const sandboxSceneSchema = z.object({
+  family: z.literal("sandbox"),
+  gravity: boundedNumber(0, 25),
+  airDensity: boundedNumber(0, 2),
+  restitution: boundedNumber(0, 1),
+  hasFloor: z.boolean(),
+  /** Inverse-square attractor strength (G·M) at the origin; 0 disables it. */
+  centralGravity: boundedNumber(0, 4000),
+  collisions: z.boolean(),
+  duration: boundedNumber(0.5, 20),
+  bodies: z.array(sandboxBodySchema).min(1).max(5),
+  springs: z.array(sandboxSpringSchema).max(4),
+  outcomeRule: sandboxOutcomeRuleSchema,
+});
+
 export const sceneSchema = z.discriminatedUnion("family", [
   dropSceneSchema,
   projectileSceneSchema,
   pendulumSceneSchema,
+  sandboxSceneSchema,
 ]);
 
 export const controlSchema = z.object({
@@ -129,7 +223,12 @@ export type GradeBand = z.infer<typeof gradeBandSchema>;
 export type DropScene = z.infer<typeof dropSceneSchema>;
 export type ProjectileScene = z.infer<typeof projectileSceneSchema>;
 export type PendulumScene = z.infer<typeof pendulumSceneSchema>;
+export type SandboxBody = z.infer<typeof sandboxBodySchema>;
+export type SandboxSpring = z.infer<typeof sandboxSpringSchema>;
+export type SandboxOutcomeRule = z.infer<typeof sandboxOutcomeRuleSchema>;
+export type SandboxScene = z.infer<typeof sandboxSceneSchema>;
 export type SceneSpec = z.infer<typeof sceneSchema>;
+export type SceneFamily = SceneSpec["family"];
 export type ControlSpec = z.infer<typeof controlSchema>;
 export type MeasurementSpec = z.infer<typeof measurementSchema>;
 export type PredictionSpec = z.infer<typeof predictionSchema>;

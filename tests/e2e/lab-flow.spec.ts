@@ -5,6 +5,7 @@ import {
   pendulumDemo,
   projectileDemo,
 } from "@/components/lab/demo-experiments";
+import { sandboxDropSpec } from "@/lib/ai/testing/sandbox-fixture";
 
 type FamilyFlow = {
   card: string;
@@ -153,6 +154,91 @@ for (const flow of flows) {
     await finishLearningLoop(page, flow);
   });
 }
+
+test("generated sandbox experiment renders live and completes the full loop", async ({
+  page,
+}) => {
+  // A generic AI-authored mechanics world (not one of the three specialised
+  // families) must render, run its deterministic trajectory to completion, and
+  // support the counterfactual transfer — proving the sandbox path is live.
+  await page.route("**/api/compile", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        spec: sandboxDropSpec(),
+        warnings: [],
+        provenance: {
+          source: "generated",
+          model: "test-model",
+          generatedAt: new Date(0).toISOString(),
+        },
+      }),
+    });
+  });
+  await page.route("**/api/evaluate", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        score: 1,
+        criteria: { c1: true, c2: true },
+        feedback: "You tied the measured fall timing to equal acceleration.",
+        hint: "Now change the air density and predict again.",
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page
+    .getByRole("textbox", { name: "What do you want to understand?" })
+    .fill("Do heavier balls fall faster than lighter balls?");
+  await page.getByRole("button", { name: "Build my world" }).click();
+
+  await expect(
+    page.getByRole("heading", {
+      name: "Released together in a vacuum, which heavier ball reaches the floor first?",
+    }),
+  ).toBeVisible({ timeout: 15_000 });
+
+  await page
+    .getByRole("button", { name: "A The heavier ball lands first" })
+    .click();
+  await page.getByRole("button", { name: "Lock prediction & run" }).click();
+
+  // Reaching the evidence heading proves the sandbox trajectory played to its
+  // end and fired onComplete with computed evidence.
+  await expect(
+    page.getByRole("heading", { name: "What the world showed" }),
+  ).toBeVisible({ timeout: 20_000 });
+
+  await page
+    .getByRole("textbox", { name: "What caused the result?" })
+    .fill(
+      "In a vacuum both balls share the same acceleration, so the heavier mass does not reach the floor sooner.",
+    );
+  await page.getByRole("button", { name: "Check my explanation" }).click();
+
+  const challenge = page.getByRole("button", { name: "Change one variable" });
+  await expect(challenge).toBeVisible({ timeout: 10_000 });
+  await challenge.click();
+
+  await expect(
+    page.getByRole("heading", {
+      name: "With thick air, which heavier ball reaches the floor first?",
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "A The heavier ball lands first" })
+    .click();
+  await page.getByRole("button", { name: "Lock prediction & run" }).click();
+
+  await expect(
+    page.getByRole("heading", {
+      name: "You didn’t memorize it. You tested it.",
+    }),
+  ).toBeVisible({ timeout: 20_000 });
+});
 
 test("provider outage never relabels a question and requires explicit backup choices", async ({
   page,

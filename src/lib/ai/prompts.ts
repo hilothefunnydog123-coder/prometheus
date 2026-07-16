@@ -1,6 +1,7 @@
 import { SCENE_PATH_BOUNDS } from "./scene-paths";
 import { EXPERIMENT_FAMILIES } from "./text-rules";
 import { OUTCOME_KEYS } from "./deterministic-outcomes";
+import { SANDBOX_METRICS } from "@/lib/contracts/experiment";
 import type { ToolDefinition } from "./featherless-client";
 
 /**
@@ -87,16 +88,62 @@ export const COMPILE_SYSTEM_PROMPT = [
   'Counterfactual Lab by calling the tool "emit_experiment_spec" exactly',
   "once. The spec drives a 3D renderer: it is pure declarative data.",
   "",
-  "Scene properties addressable by controls, counterfactual changes, and",
-  "prediction testChange (allowlist, with bounds):",
+  "You can build any classical-mechanics experiment. Prefer a purpose-built",
+  '"sandbox" scene for the learner\'s question. The three specialised families',
+  "(drop, projectile, pendulum) are polished special cases; use one only when",
+  "the question is exactly that scenario. For anything else — springs and",
+  "oscillators, collisions and momentum, orbits and central gravity, ramps,",
+  "bouncing, multi-body races, Atwood-style setups — build a sandbox scene.",
+  "Never refuse a mechanics question; express it as a sandbox world.",
+  "",
+  "Classic-family scene properties addressable by controls, counterfactual",
+  "changes, and prediction testChange (allowlist, with bounds):",
   pathTable(),
+  "",
+  "Sandbox addressable paths (i is a 0-based body/spring index):",
+  "- scene.gravity [0,25]; scene.airDensity [0,2]; scene.restitution [0,1];",
+  "  scene.centralGravity [0,4000]; scene.duration [0.5,20]",
+  "- scene.bodies.i.mass [0.05,100]; .radius [0.05,2]; .dragCoefficient [0,2.5];",
+  "  .position.x [-30,30]; .position.y [-30,40]; .velocity.x/.velocity.y [-40,40]",
+  "- scene.springs.i.stiffness [0,200]; .restLength [0,40]; .damping [0,20]",
   "",
   "Prediction outcome vocabularies (per family):",
   outcomeTable(),
+  "- sandbox compare_bodies: a, b, tie (a = bodyA satisfies the comparator)",
+  "- sandbox compare_change: increase, decrease, same",
+  "",
+  "Sandbox model (a deterministic engine owns the result — you never do):",
+  "- bodies are spheres in a vertical x-y plane. y is up; the floor, when",
+  "  hasFloor is true, sits at y=0, so place bodies with position.y above their",
+  "  radius. Set fixed=true for walls, pivots, or an orbital centre; at least",
+  "  one body must be free (fixed=false).",
+  "- Forces available: uniform gravity (downward), quadratic air drag (needs",
+  "  airDensity>0 and a body dragCoefficient>0), Hooke springs, an",
+  "  inverse-square attractor of strength centralGravity at the origin (0,0),",
+  "  a floor with restitution, and pairwise collisions when collisions=true.",
+  "- A spring connects bodyA to bodyB, or to its fixed anchor point when bodyB",
+  "  is null. restLength is its natural length; stiffness is k; damping resists",
+  "  stretching. For a mass-on-spring oscillator, offset the body from the",
+  "  equilibrium (anchor distance = restLength) by a small amount.",
+  "- For an orbit, set gravity=0, centralGravity>0, place the body at radius r",
+  "  from the origin and give it a perpendicular velocity near sqrt(centralGravity/r).",
+  "- outcomeRule decides the prediction. compare_bodies compares one metric",
+  "  between bodyA and bodyB (comparator greater/less, with a tie tolerance in",
+  "  the metric's units). compare_change compares one metric for a single body",
+  "  between the base world and the world after the declared change. Metrics:",
+  "  " + SANDBOX_METRICS.join(", ") + ".",
+  "- Choose duration so the metric is observable: long enough for a body to",
+  "  reach the floor (time_to_floor), for at least two full oscillations",
+  "  (period), or for the motion the question is about to complete.",
+  "- compare_bodies base predictions MUST NOT include testChange. compare_change",
+  "  base predictions MUST include testChange equal to the compared change.",
+  "- outcomeRule bodyA/bodyB/body and every spring endpoint must be ids that",
+  "  exist in scene.bodies; give bodies distinct ids and clear labels.",
   "",
   "Hard rules:",
   "- Every prediction has exactly three choices whose outcomeKeys are the",
-  "  family's three outcome keys, each used once.",
+  "  scene's three outcome keys (the family's keys, or the sandbox rule's",
+  "  keys), each used once.",
   "- Set correctOutcomeKey to your best physics estimate; the server",
   "  recomputes and overwrites it deterministically.",
   "- Pendulum base predictions MUST include testChange describing the",
@@ -201,6 +248,134 @@ const changeJsonSchema = {
   properties: {
     targetPath: { type: "string", pattern: "^scene\\.[a-zA-Z0-9.]+$" },
     value: { type: "number" },
+  },
+} as const;
+
+const sandboxVectorJsonSchema = (
+  xMin: number,
+  xMax: number,
+  yMin: number,
+  yMax: number,
+) =>
+  ({
+    type: "object",
+    additionalProperties: false,
+    required: ["x", "y"],
+    properties: {
+      x: { type: "number", minimum: xMin, maximum: xMax },
+      y: { type: "number", minimum: yMin, maximum: yMax },
+    },
+  }) as const;
+
+const sandboxBodyJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "label",
+    "mass",
+    "radius",
+    "dragCoefficient",
+    "fixed",
+    "color",
+    "position",
+    "velocity",
+  ],
+  properties: {
+    id: idSchema,
+    label: { type: "string", minLength: 1, maxLength: 40 },
+    mass: { type: "number", minimum: 0.05, maximum: 100 },
+    radius: { type: "number", minimum: 0.05, maximum: 2 },
+    dragCoefficient: { type: "number", minimum: 0, maximum: 2.5 },
+    fixed: { type: "boolean" },
+    color: colorSchema,
+    position: sandboxVectorJsonSchema(-30, 30, -30, 40),
+    velocity: sandboxVectorJsonSchema(-40, 40, -40, 40),
+  },
+} as const;
+
+const sandboxSpringJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "bodyA", "bodyB", "anchor", "stiffness", "restLength", "damping"],
+  properties: {
+    id: idSchema,
+    bodyA: { type: "string", minLength: 1, maxLength: 40 },
+    bodyB: {
+      anyOf: [
+        { type: "string", minLength: 1, maxLength: 40 },
+        { type: "null" },
+      ],
+    },
+    anchor: sandboxVectorJsonSchema(-30, 30, -30, 40),
+    stiffness: { type: "number", minimum: 0, maximum: 200 },
+    restLength: { type: "number", minimum: 0, maximum: 40 },
+    damping: { type: "number", minimum: 0, maximum: 20 },
+  },
+} as const;
+
+const sandboxOutcomeRuleJsonSchema = {
+  anyOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "metric", "bodyA", "bodyB", "comparator", "tolerance"],
+      properties: {
+        kind: { type: "string", enum: ["compare_bodies"] },
+        metric: { type: "string", enum: [...SANDBOX_METRICS] },
+        bodyA: { type: "string", minLength: 1, maxLength: 40 },
+        bodyB: { type: "string", minLength: 1, maxLength: 40 },
+        comparator: { type: "string", enum: ["greater", "less"] },
+        tolerance: { type: "number", minimum: 0, maximum: 1000 },
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "metric", "body", "tolerance"],
+      properties: {
+        kind: { type: "string", enum: ["compare_change"] },
+        metric: { type: "string", enum: [...SANDBOX_METRICS] },
+        body: { type: "string", minLength: 1, maxLength: 40 },
+        tolerance: { type: "number", minimum: 0, maximum: 1000 },
+      },
+    },
+  ],
+} as const;
+
+const sandboxSceneJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "family",
+    "gravity",
+    "airDensity",
+    "restitution",
+    "hasFloor",
+    "centralGravity",
+    "collisions",
+    "duration",
+    "bodies",
+    "springs",
+    "outcomeRule",
+  ],
+  properties: {
+    family: { type: "string", enum: ["sandbox"] },
+    gravity: { type: "number", minimum: 0, maximum: 25 },
+    airDensity: { type: "number", minimum: 0, maximum: 2 },
+    restitution: { type: "number", minimum: 0, maximum: 1 },
+    hasFloor: { type: "boolean" },
+    centralGravity: { type: "number", minimum: 0, maximum: 4000 },
+    collisions: { type: "boolean" },
+    duration: { type: "number", minimum: 0.5, maximum: 20 },
+    bodies: {
+      type: "array",
+      minItems: 1,
+      maxItems: 5,
+      items: sandboxBodyJsonSchema,
+    },
+    springs: { type: "array", maxItems: 4, items: sandboxSpringJsonSchema },
+    outcomeRule: sandboxOutcomeRuleJsonSchema,
   },
 } as const;
 
@@ -323,6 +498,7 @@ export const EMIT_EXPERIMENT_SPEC_TOOL: ToolDefinition = {
               bob: bodyJsonSchema,
             },
           },
+          sandboxSceneJsonSchema,
         ],
       },
       controls: {

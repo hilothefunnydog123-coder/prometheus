@@ -1,4 +1,4 @@
-import type { SceneSpec } from "@/lib/contracts/experiment";
+import type { SceneFamily, SceneSpec } from "@/lib/contracts/experiment";
 import type { ExperimentFamily } from "./text-rules";
 
 /**
@@ -55,17 +55,51 @@ export const SCENE_PATH_BOUNDS: Record<
   },
 };
 
+/**
+ * Sandbox scenes have a variable number of bodies and springs, so their
+ * addressable paths cannot be a static table. Each entry is a regex matching
+ * an indexed leaf plus the bounds that leaf must respect (mirroring the
+ * contract's sandbox schema). Whether the index actually exists in a given
+ * scene is enforced separately: callers verify getSceneValue !== null.
+ */
+const SANDBOX_PATH_RULES: ReadonlyArray<{ pattern: RegExp; bounds: PathBounds }> = [
+  { pattern: /^scene\.gravity$/, bounds: { min: 0, max: 25 } },
+  { pattern: /^scene\.airDensity$/, bounds: { min: 0, max: 2 } },
+  { pattern: /^scene\.restitution$/, bounds: { min: 0, max: 1 } },
+  { pattern: /^scene\.centralGravity$/, bounds: { min: 0, max: 4000 } },
+  { pattern: /^scene\.duration$/, bounds: { min: 0.5, max: 20 } },
+  { pattern: /^scene\.bodies\.\d+\.mass$/, bounds: { min: 0.05, max: 100 } },
+  { pattern: /^scene\.bodies\.\d+\.radius$/, bounds: { min: 0.05, max: 2 } },
+  { pattern: /^scene\.bodies\.\d+\.dragCoefficient$/, bounds: { min: 0, max: 2.5 } },
+  { pattern: /^scene\.bodies\.\d+\.position\.x$/, bounds: { min: -30, max: 30 } },
+  { pattern: /^scene\.bodies\.\d+\.position\.y$/, bounds: { min: -30, max: 40 } },
+  { pattern: /^scene\.bodies\.\d+\.velocity\.x$/, bounds: { min: -40, max: 40 } },
+  { pattern: /^scene\.bodies\.\d+\.velocity\.y$/, bounds: { min: -40, max: 40 } },
+  { pattern: /^scene\.springs\.\d+\.stiffness$/, bounds: { min: 0, max: 200 } },
+  { pattern: /^scene\.springs\.\d+\.restLength$/, bounds: { min: 0, max: 40 } },
+  { pattern: /^scene\.springs\.\d+\.damping$/, bounds: { min: 0, max: 20 } },
+];
+
+function sandboxPathBounds(targetPath: string): PathBounds | null {
+  for (const rule of SANDBOX_PATH_RULES) {
+    if (rule.pattern.test(targetPath)) return rule.bounds;
+  }
+  return null;
+}
+
 export function isAllowlistedPath(
-  family: ExperimentFamily,
+  family: SceneFamily,
   targetPath: string,
 ): boolean {
+  if (family === "sandbox") return sandboxPathBounds(targetPath) !== null;
   return targetPath in SCENE_PATH_BOUNDS[family];
 }
 
 export function pathBounds(
-  family: ExperimentFamily,
+  family: SceneFamily,
   targetPath: string,
 ): PathBounds | null {
+  if (family === "sandbox") return sandboxPathBounds(targetPath);
   return SCENE_PATH_BOUNDS[family][targetPath] ?? null;
 }
 

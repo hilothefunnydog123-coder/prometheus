@@ -8,9 +8,9 @@ import {
 } from "@/lib/contracts/experiment";
 import {
   MAX_SIMULATED_SECONDS,
-  OUTCOME_KEYS,
   expectedOutcomeKey,
   finalizeCorrectness,
+  outcomeKeysFor,
   sceneDuration,
   type SceneChange,
 } from "./deterministic-outcomes";
@@ -132,7 +132,7 @@ function checkPrediction(
   label: string,
 ): string[] {
   const errors: string[] = [];
-  const vocabulary = OUTCOME_KEYS[spec.scene.family];
+  const vocabulary = outcomeKeysFor(spec.scene);
 
   const ids = prediction.choices.map((choice) => choice.id);
   if (new Set(ids).size !== ids.length) {
@@ -225,6 +225,64 @@ function checkMeasurements(spec: ExperimentSpec): string[] {
     : ["measurements: ids must be unique"];
 }
 
+/**
+ * A base prediction carries a testChange only when the outcome compares two
+ * worlds: pendulum period questions and sandbox compare_change rules. Every
+ * other prediction describes the rendered base scene directly.
+ */
+function baseTestChangeRequired(spec: ExperimentSpec): boolean {
+  if (spec.scene.family === "pendulum") return true;
+  return (
+    spec.scene.family === "sandbox" &&
+    spec.scene.outcomeRule.kind === "compare_change"
+  );
+}
+
+function checkSandboxRequirements(scene: ExperimentSpec["scene"]): string[] {
+  if (scene.family !== "sandbox") return [];
+  const errors: string[] = [];
+  const ids = scene.bodies.map((body) => body.id);
+  const idSet = new Set(ids);
+  if (idSet.size !== ids.length) {
+    errors.push("scene.bodies: body ids must be unique");
+  }
+  if (!scene.bodies.some((body) => !body.fixed)) {
+    errors.push("scene.bodies: at least one body must be free to move (fixed=false)");
+  }
+
+  const rule = scene.outcomeRule;
+  if (rule.kind === "compare_bodies") {
+    if (scene.bodies.length < 2) {
+      errors.push("scene.bodies: compare_bodies rules need at least two bodies");
+    }
+    if (rule.bodyA === rule.bodyB) {
+      errors.push("outcomeRule: bodyA and bodyB must reference different bodies");
+    }
+    if (!idSet.has(rule.bodyA)) {
+      errors.push(`outcomeRule.bodyA: unknown body "${rule.bodyA}"`);
+    }
+    if (!idSet.has(rule.bodyB)) {
+      errors.push(`outcomeRule.bodyB: unknown body "${rule.bodyB}"`);
+    }
+  } else if (!idSet.has(rule.body)) {
+    errors.push(`outcomeRule.body: unknown body "${rule.body}"`);
+  }
+
+  const springIds = scene.springs.map((spring) => spring.id);
+  if (new Set(springIds).size !== springIds.length) {
+    errors.push("scene.springs: spring ids must be unique");
+  }
+  for (const spring of scene.springs) {
+    if (!idSet.has(spring.bodyA)) {
+      errors.push(`scene.springs.${spring.id}: unknown bodyA "${spring.bodyA}"`);
+    }
+    if (spring.bodyB !== null && !idSet.has(spring.bodyB)) {
+      errors.push(`scene.springs.${spring.id}: unknown bodyB "${spring.bodyB}"`);
+    }
+  }
+  return errors;
+}
+
 function checkFamilyRequirements(spec: ExperimentSpec): string[] {
   const errors: string[] = [];
   if (spec.scene.family === "drop") {
@@ -238,14 +296,17 @@ function checkFamilyRequirements(spec: ExperimentSpec): string[] {
       "scene.targetDistance: required — undershoot/hit/overshoot predictions need a target",
     );
   }
-  if (spec.scene.family === "pendulum" && !spec.prediction.testChange) {
+  errors.push(...checkSandboxRequirements(spec.scene));
+
+  const needsTestChange = baseTestChangeRequired(spec);
+  if (needsTestChange && !spec.prediction.testChange) {
     errors.push(
-      "prediction.testChange: required for pendulum — declare the compared change (e.g. scene.bob.mass to a new value) instead of describing it only in prose",
+      "prediction.testChange: required — declare the compared change (e.g. scene.bodies.0.mass to a new value) instead of describing it only in prose",
     );
   }
-  if (spec.scene.family !== "pendulum" && spec.prediction.testChange) {
+  if (!needsTestChange && spec.prediction.testChange) {
     errors.push(
-      "prediction.testChange: base drop/projectile predictions must describe the rendered base scene",
+      "prediction.testChange: this base prediction must describe the rendered base scene, not a change",
     );
   }
   return errors;
@@ -290,7 +351,8 @@ function checkOutcomesComputable(spec: ExperimentSpec): string[] {
   const errors: string[] = [];
   if (
     expectedOutcomeKey(spec.scene, spec.prediction.testChange) === null &&
-    spec.scene.family !== "pendulum" // pendulum is reported by family checks
+    spec.scene.family !== "pendulum" && // pendulum is reported by family checks
+    spec.scene.family !== "sandbox" // sandbox testChange is reported by family checks
   ) {
     errors.push("prediction: outcome is not computable for the base scene");
   }

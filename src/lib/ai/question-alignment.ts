@@ -98,8 +98,8 @@ export function questionAlignmentErrors(
     asksTerminalVelocity || /\b(?:air resistance|aerodynamic drag|drag force)\b/.test(question);
 
   if (asksTerminalVelocity) {
-    if (spec.scene.family !== "drop") {
-      errors.push("terminal-velocity questions require a drop scene");
+    if (spec.scene.family !== "drop" && spec.scene.family !== "sandbox") {
+      errors.push("terminal-velocity questions require a drop or sandbox scene");
     }
     if (!/\bterminal velocity\b/.test(text)) {
       errors.push(
@@ -114,7 +114,16 @@ export function questionAlignmentErrors(
   }
 
   if (asksAboutDrag) {
-    if (spec.scene.family === "drop") {
+    if (spec.scene.family === "sandbox") {
+      if (spec.scene.airDensity <= 0) {
+        errors.push("air-resistance questions require non-zero air density");
+      }
+      if (!spec.scene.bodies.some((body) => body.dragCoefficient > 0)) {
+        errors.push(
+          "air-resistance questions require a body with non-zero drag",
+        );
+      }
+    } else if (spec.scene.family === "drop") {
       if (spec.scene.airDensity <= 0) {
         errors.push("air-resistance questions require non-zero air density");
       }
@@ -146,24 +155,30 @@ export function questionAlignmentErrors(
   }
 
   if (/\b(?:launch|projection) angle\b|\bangle.*(?:range|distance)\b/.test(question)) {
-    if (spec.scene.family !== "projectile") {
-      errors.push("launch-angle questions require a projectile scene");
-    } else if (!hasChangePath(spec, "scene.launch.angleDegrees")) {
-      errors.push(
-        "launch-angle questions must expose or change the launch angle",
-      );
+    if (spec.scene.family === "projectile") {
+      if (!hasChangePath(spec, "scene.launch.angleDegrees")) {
+        errors.push(
+          "launch-angle questions must expose or change the launch angle",
+        );
+      }
+    } else if (spec.scene.family !== "sandbox") {
+      // Sandbox encodes an angle through the launch velocity vector, so it is
+      // allowed to answer angle questions without a dedicated angle field.
+      errors.push("launch-angle questions require a projectile or sandbox scene");
     }
   }
 
   if (
     /\b(?:string|rope|pendulum) length\b|\bmetronome\b/.test(question)
   ) {
-    if (spec.scene.family !== "pendulum") {
-      errors.push("pendulum-length questions require a pendulum scene");
-    } else if (!hasChangePath(spec, "scene.length")) {
-      errors.push(
-        "pendulum-length questions must expose or change string length",
-      );
+    if (spec.scene.family === "pendulum") {
+      if (!hasChangePath(spec, "scene.length")) {
+        errors.push(
+          "pendulum-length questions must expose or change string length",
+        );
+      }
+    } else if (spec.scene.family !== "sandbox") {
+      errors.push("pendulum-length questions require a pendulum or sandbox scene");
     }
   }
 

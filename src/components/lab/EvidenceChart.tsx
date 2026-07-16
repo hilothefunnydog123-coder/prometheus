@@ -17,16 +17,22 @@ import {
 
 export function EvidenceChart({ spec, evidence }: { spec: ExperimentSpec; evidence: SimulationEvidence }) {
   const velocityFocusedDrop = isVelocityFocusedDrop(spec);
-  const labels =
-    spec.scene.family === "drop"
+  const sandbox = spec.scene.family === "sandbox";
+  const labels = sandbox
+    ? [
+        spec.measurements[0]?.label ?? "Series A",
+        spec.measurements[1]?.label ?? "Series B",
+      ]
+    : spec.scene.family === "drop"
       ? velocityFocusedDrop
         ? ["Object A speed", "Object B speed"]
         : ["Object A height", "Object B height"]
       : spec.scene.family === "projectile"
         ? ["Horizontal position", "Height"]
         : ["Angle", "Speed"];
-  const units =
-    spec.scene.family === "drop"
+  const units = sandbox
+    ? [spec.measurements[0]?.unit ?? "m", spec.measurements[1]?.unit ?? "m"]
+    : spec.scene.family === "drop"
       ? velocityFocusedDrop
         ? ["m/s", "m/s"]
         : ["m", "m"]
