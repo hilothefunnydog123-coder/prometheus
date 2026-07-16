@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ExperimentSpec } from "./contracts/experiment-spec";
 import { dropFixture } from "@/lib/fixtures/drop";
+import { pendulumFixture } from "@/lib/fixtures/pendulum";
 import { characteristicTime, validateExperimentSpec } from "./validation";
 
 /** Deep-clone the golden drop fixture so tests can mutate freely. */
@@ -82,6 +83,24 @@ describe("validateExperimentSpec", () => {
       }),
       "simulation.duration",
     );
+  });
+
+  it("rejects a wide pendulum swing that only fits the small-angle period", () => {
+    // At 60° the exact period (≈ 3.05 s for L = 2 m) exceeds the small-angle
+    // value (≈ 2.84 s); a 2.9 s window used to pass feasibility incorrectly.
+    const spec = JSON.parse(
+      JSON.stringify(pendulumFixture),
+    ) as ExperimentSpec;
+    spec.parameters.releaseAngleDeg = 60;
+    spec.simulation.duration = 2.9;
+    spec.counterfactuals = [
+      {
+        id: "double-mass",
+        label: "Double the mass of the bob",
+        patch: { parameter: "mass", value: 2 },
+      },
+    ];
+    expectErrors(spec, "simulation.duration");
   });
 
   it("rejects duplicate prediction outcome ids", () => {
@@ -181,6 +200,18 @@ describe("characteristicTime", () => {
     expect(
       characteristicTime("pendulum", { gravity: 9.81, length: 2 }),
     ).toBeCloseTo(2 * Math.PI * Math.sqrt(2 / 9.81), 5);
+  });
+
+  it("applies the large-amplitude correction to the pendulum period", () => {
+    const smallAngle = 2 * Math.PI * Math.sqrt(2 / 9.81);
+    const corrected = characteristicTime("pendulum", {
+      gravity: 9.81,
+      length: 2,
+      releaseAngleDeg: 60,
+    })!;
+    // ~7.3% longer than the small-angle value at the 60° amplitude bound.
+    expect(corrected / smallAngle).toBeGreaterThan(1.07);
+    expect(corrected / smallAngle).toBeLessThan(1.08);
   });
 
   it("returns null when parameters are missing", () => {

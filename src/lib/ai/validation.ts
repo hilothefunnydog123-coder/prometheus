@@ -9,6 +9,7 @@ import {
   type ExperimentSpec,
   type ParameterName,
 } from "./contracts/experiment-spec";
+import { pendulumPeriod } from "@/lib/simulation/outcomes";
 
 /**
  * Deterministic domain validation for ExperimentSpec, layered on top of the
@@ -110,7 +111,13 @@ export function characteristicTime(
       const length = parameters.length;
       if (length === undefined || length <= 0) return null;
       // One full period; the renderer should show at least one swing cycle.
-      return 2 * Math.PI * Math.sqrt(length / g);
+      // Use the amplitude-exact period when the release angle is known: the
+      // small-angle formula under-reports by ~7% at the 60° bound, which
+      // would let a too-short simulation window pass feasibility.
+      const amplitude = parameters.releaseAngleDeg;
+      return amplitude !== undefined && amplitude > 0
+        ? pendulumPeriod(length, g, amplitude)
+        : 2 * Math.PI * Math.sqrt(length / g);
     }
   }
 }
