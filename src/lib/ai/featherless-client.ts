@@ -168,6 +168,12 @@ export async function chatCompletion(
   const timeoutBudgetMs = normalizedTimeoutMs(config, request.timeoutMs);
   const deadline = Date.now() + timeoutBudgetMs;
 
+  // reasoning_effort is only accepted by thinking-capable models. When the
+  // configured model rejects the request outright (HTTP 400) and we sent that
+  // optional tuning parameter, retry once without it instead of failing the
+  // whole compilation — e.g. Gemini "flash" (non-thinking) models 400 on it.
+  let activeConfig = config;
+
   for (let attempt = 1; ; attempt += 1) {
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) {
@@ -175,13 +181,22 @@ export async function chatCompletion(
     }
     try {
       return await chatCompletionOnce(
-        config,
+        activeConfig,
         { ...request, timeoutMs: remainingMs },
         fetchImpl,
       );
     } catch (error) {
       if (request.signal?.aborted) {
         throw new ProviderCancelledError();
+      }
+      if (
+        error instanceof ProviderHttpError &&
+        error.status === 400 &&
+        activeConfig.reasoningEffort &&
+        attempt < MAX_PROVIDER_ATTEMPTS
+      ) {
+        activeConfig = { ...activeConfig, reasoningEffort: undefined };
+        continue;
       }
       const transient =
         error instanceof ProviderHttpError &&

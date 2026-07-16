@@ -196,6 +196,58 @@ describe("chatCompletion", () => {
     expect(stub.calls).toHaveLength(1);
   });
 
+  it("retries a 400 once without reasoning_effort for models that reject it", async () => {
+    // Gemini non-thinking models (e.g. gemini-2.0-flash) reject the optional
+    // reasoning_effort parameter with HTTP 400. The client must drop the
+    // parameter and retry instead of failing the compilation.
+    const geminiConfig: FeatherlessConfig = {
+      ...config,
+      maxTokensParameter: null,
+      supportsTemperature: false,
+      structuredOutputMode: "json-schema",
+      reasoningEffort: "minimal",
+    };
+    const stub = createFetchStub([
+      jsonResponse({ error: "reasoning_effort is not supported" }, 400),
+      textResponse('{"hello":"gemini"}'),
+    ]);
+    const result = await chatCompletion(
+      geminiConfig,
+      { ...request, tool },
+      stub.fetchImpl,
+    );
+    expect(result.toolArguments).toBe('{"hello":"gemini"}');
+    expect(stub.calls).toHaveLength(2);
+    expect(stub.calls[0]!.body.reasoning_effort).toBe("minimal");
+    expect(stub.calls[1]!.body.reasoning_effort).toBeUndefined();
+    // The rest of the request is unchanged on the retry.
+    expect(stub.calls[1]!.body.response_format).toEqual(
+      stub.calls[0]!.body.response_format,
+    );
+  });
+
+  it("gives up after one stripped-parameter retry on repeated 400s", async () => {
+    const geminiConfig: FeatherlessConfig = {
+      ...config,
+      maxTokensParameter: null,
+      supportsTemperature: false,
+      structuredOutputMode: "json-schema",
+      reasoningEffort: "minimal",
+    };
+    const stub = createFetchStub([
+      jsonResponse({ error: "bad request" }, 400),
+      jsonResponse({ error: "still bad" }, 400),
+    ]);
+    const error = await chatCompletion(
+      geminiConfig,
+      { ...request, tool },
+      stub.fetchImpl,
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ProviderHttpError);
+    expect((error as ProviderHttpError).status).toBe(400);
+    expect(stub.calls).toHaveLength(2);
+  });
+
   it("does not retry timeouts", async () => {
     const stub = createFetchStub(["hang"]);
     await expect(
