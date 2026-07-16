@@ -171,8 +171,27 @@ export function repairPrompt(errors: string[]): string {
   ].join("\n");
 }
 
-const idSchema = { type: "string", minLength: 1, maxLength: 40 } as const;
-const colorSchema = { type: "string", pattern: "^#[0-9a-fA-F]{6}$" } as const;
+/**
+ * Tool parameter schemas must stay inside the JSON Schema subset that every
+ * supported provider's function-calling converter accepts. Gemini's OpenAI
+ * compatibility layer rejects `oneOf` and numeric `exclusiveMinimum` with
+ * HTTP 400, and `pattern` support varies — so unions are flattened, bounds
+ * use `minimum`, and formats are described in prose. Zod + domain validation
+ * (src/lib/ai/validation.ts) remain the authority; these schemas only guide
+ * the model. Guarded by prompts.test.ts.
+ */
+const idSchema = {
+  type: "string",
+  minLength: 1,
+  maxLength: 40,
+  description: "Short id: letters, digits, hyphens, underscores.",
+} as const;
+const colorSchema = {
+  type: "string",
+  minLength: 7,
+  maxLength: 7,
+  description: "Hex color like #ff8a3d.",
+} as const;
 
 const bodyJsonSchema = {
   type: "object",
@@ -192,7 +211,12 @@ const changeJsonSchema = {
   additionalProperties: false,
   required: ["targetPath", "value"],
   properties: {
-    targetPath: { type: "string", pattern: "^scene\\.[a-zA-Z0-9.]+$" },
+    targetPath: {
+      type: "string",
+      minLength: 7,
+      maxLength: 60,
+      description: "Allowlisted scene path such as scene.bob.mass.",
+    },
     value: { type: "number" },
   },
 } as const;
@@ -251,72 +275,57 @@ export const EMIT_EXPERIMENT_SPEC_TOOL: ToolDefinition = {
     ],
     properties: {
       version: { type: "string", enum: ["1.0"] },
-      id: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$" },
+      id: {
+        type: "string",
+        minLength: 1,
+        maxLength: 80,
+        description: "Slug of letters, digits, hyphens, underscores.",
+      },
       title: { type: "string", minLength: 1, maxLength: 140 },
       gradeBand: { type: "string", enum: ["8-10", "11-12"] },
       objective: { type: "string", minLength: 1, maxLength: 300 },
       sourceSummary: { type: "string", minLength: 1, maxLength: 500 },
       scene: {
-        oneOf: [
-          {
+        // Flattened family union: provider function-calling converters that
+        // reject oneOf (Gemini) accept this single-object form. The compile
+        // system prompt states which properties each family requires, and
+        // server-side validation enforces it exactly.
+        type: "object",
+        additionalProperties: false,
+        required: ["family", "gravity"],
+        description:
+          "Family-specific scene. drop requires height, airDensity, objects " +
+          "(exactly 2). projectile requires launch, object, targetDistance. " +
+          "pendulum requires length, releaseAngleDegrees, damping, bob. Set " +
+          "only the properties of the chosen family.",
+        properties: {
+          family: { type: "string", enum: ["drop", "projectile", "pendulum"] },
+          gravity: { type: "number", minimum: 0.5, maximum: 25 },
+          height: { type: "number", minimum: 0.5, maximum: 20 },
+          airDensity: { type: "number", minimum: 0, maximum: 2 },
+          objects: {
+            type: "array",
+            minItems: 2,
+            maxItems: 2,
+            items: bodyJsonSchema,
+          },
+          launch: {
             type: "object",
             additionalProperties: false,
-            required: ["family", "gravity", "height", "airDensity", "objects"],
+            required: ["speed", "angleDegrees", "height"],
             properties: {
-              family: { type: "string", enum: ["drop"] },
-              gravity: { type: "number", minimum: 0.5, maximum: 25 },
-              height: { type: "number", minimum: 0.5, maximum: 20 },
-              airDensity: { type: "number", minimum: 0, maximum: 2 },
-              objects: {
-                type: "array",
-                minItems: 2,
-                maxItems: 2,
-                items: bodyJsonSchema,
-              },
+              speed: { type: "number", minimum: 1, maximum: 40 },
+              angleDegrees: { type: "number", minimum: 1, maximum: 80 },
+              height: { type: "number", minimum: 0, maximum: 20 },
             },
           },
-          {
-            type: "object",
-            additionalProperties: false,
-            required: ["family", "gravity", "launch", "object", "targetDistance"],
-            properties: {
-              family: { type: "string", enum: ["projectile"] },
-              gravity: { type: "number", minimum: 0.5, maximum: 25 },
-              launch: {
-                type: "object",
-                additionalProperties: false,
-                required: ["speed", "angleDegrees", "height"],
-                properties: {
-                  speed: { type: "number", minimum: 1, maximum: 40 },
-                  angleDegrees: { type: "number", minimum: 1, maximum: 80 },
-                  height: { type: "number", minimum: 0, maximum: 20 },
-                },
-              },
-              object: bodyJsonSchema,
-              targetDistance: { type: "number", minimum: 1, maximum: 100 },
-            },
-          },
-          {
-            type: "object",
-            additionalProperties: false,
-            required: [
-              "family",
-              "gravity",
-              "length",
-              "releaseAngleDegrees",
-              "damping",
-              "bob",
-            ],
-            properties: {
-              family: { type: "string", enum: ["pendulum"] },
-              gravity: { type: "number", minimum: 0.5, maximum: 25 },
-              length: { type: "number", minimum: 0.25, maximum: 10 },
-              releaseAngleDegrees: { type: "number", minimum: 1, maximum: 80 },
-              damping: { type: "number", minimum: 0, maximum: 2 },
-              bob: bodyJsonSchema,
-            },
-          },
-        ],
+          object: bodyJsonSchema,
+          targetDistance: { type: "number", minimum: 1, maximum: 100 },
+          length: { type: "number", minimum: 0.25, maximum: 10 },
+          releaseAngleDegrees: { type: "number", minimum: 1, maximum: 80 },
+          damping: { type: "number", minimum: 0, maximum: 2 },
+          bob: bodyJsonSchema,
+        },
       },
       controls: {
         type: "array",
@@ -331,9 +340,18 @@ export const EMIT_EXPERIMENT_SPEC_TOOL: ToolDefinition = {
             unit: { type: "string", maxLength: 12 },
             min: { type: "number" },
             max: { type: "number" },
-            step: { type: "number", exclusiveMinimum: 0 },
+            step: {
+              type: "number",
+              minimum: 0.0001,
+              description: "Positive slider step.",
+            },
             value: { type: "number" },
-            targetPath: { type: "string", pattern: "^scene\\.[a-zA-Z0-9.]+$" },
+            targetPath: {
+              type: "string",
+              minLength: 7,
+              maxLength: 60,
+              description: "Allowlisted scene path such as scene.height.",
+            },
           },
         },
       },
@@ -407,7 +425,12 @@ export const REPORT_LEARNING_INTENT_TOOL: ToolDefinition = {
       concepts: {
         type: "array",
         maxItems: 5,
-        items: { type: "string", pattern: "^[a-z0-9][a-z0-9_-]{0,31}$" },
+        items: {
+          type: "string",
+          minLength: 1,
+          maxLength: 32,
+          description: "Lowercase slug like pendulum-period.",
+        },
       },
       difficulty: { type: "string", enum: ["intro", "standard", "advanced"] },
       confidence: { type: "number", minimum: 0, maximum: 1 },
