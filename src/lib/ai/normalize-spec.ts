@@ -26,9 +26,15 @@ export function normalizeGeneratedSpec(input: unknown): unknown {
   if (!parsed.success) return input; // schema errors go to repair as before
   const spec = parsed.data;
 
-  // A base testChange only means something for pendulum period comparisons;
-  // on drop/projectile the base prediction describes the rendered scene.
-  if (spec.scene.family !== "pendulum" && spec.prediction.testChange) {
+  // A base testChange only means something for comparison-style predictions:
+  // pendulum period questions and sandbox compare_change rules both describe a
+  // second world. Everywhere else the base prediction describes the rendered
+  // scene as-is, so a stray testChange is dropped.
+  const baseNeedsTestChange =
+    spec.scene.family === "pendulum" ||
+    (spec.scene.family === "sandbox" &&
+      spec.scene.outcomeRule.kind === "compare_change");
+  if (!baseNeedsTestChange && spec.prediction.testChange) {
     delete spec.prediction.testChange;
   }
 

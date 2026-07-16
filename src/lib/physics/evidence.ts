@@ -4,8 +4,14 @@ import {
   type ExperimentSpec,
   type PendulumScene,
   type ProjectileScene,
+  type SandboxScene,
   type SceneSpec,
 } from "@/lib/contracts/experiment";
+import {
+  buildSandboxEvidence,
+  sandboxCompareBodies,
+  sandboxCompareChange,
+} from "./sandbox";
 
 export type EvidencePoint = {
   time: number;
@@ -706,6 +712,17 @@ export function determineOutcome(
   referenceScene?: SceneSpec,
 ) {
   assertValidScene(scene);
+  if (scene.family === "sandbox") {
+    if (scene.outcomeRule.kind === "compare_bodies") {
+      return sandboxCompareBodies(scene);
+    }
+    if (referenceScene === undefined) return "same";
+    assertValidScene(referenceScene);
+    if (referenceScene.family !== "sandbox") {
+      throw new TypeError("sandbox outcomes require a sandbox reference scene");
+    }
+    return sandboxCompareChange(referenceScene, scene);
+  }
   if (scene.family === "drop") {
     const [a, b] = scene.objects;
     const timeA = quadraticDragDropTime(
@@ -826,6 +843,19 @@ function comparisonForEvidence(spec: ExperimentSpec) {
 export function buildEvidence(spec: ExperimentSpec): SimulationEvidence {
   const { scene } = spec;
   assertValidScene(scene);
+  if (scene.family === "sandbox") {
+    if (scene.outcomeRule.kind === "compare_change") {
+      const comparison = comparisonForEvidence(spec);
+      return buildSandboxEvidence({
+        scene,
+        referenceScene:
+          comparison && comparison.reference.family === "sandbox"
+            ? (comparison.reference as SandboxScene)
+            : undefined,
+      });
+    }
+    return buildSandboxEvidence({ scene });
+  }
   if (scene.family === "drop") {
     const [a, b] = scene.objects;
     const dragFactorA = quadraticDragFactor(

@@ -403,7 +403,8 @@ function Landing({
           </div>
           <label htmlFor="experiment-question">What do you want to understand?</label>
           <p id="experiment-scope" className="prompt-scope">
-            Supported now: falling objects, projectile motion, and pendulums.
+            Ask anything in mechanics — falling objects, projectiles, pendulums,
+            springs, collisions, orbits. The AI builds each world live.
           </p>
           <textarea
             id="experiment-question"
@@ -642,6 +643,9 @@ function chartTitle(spec: ExperimentSpec) {
   if (spec.scene.family === "projectile") {
     return "Position and height vs. time";
   }
+  if (spec.scene.family === "sandbox") {
+    return "Tracked motion vs. time";
+  }
   return "Angle and speed vs. time";
 }
 
@@ -873,7 +877,17 @@ function LabWorkspace({
                 ? PROJECTILE_AIR_DENSITY_KG_PER_CUBIC_METER
                 : 0,
           }
-        : { name: "Idealized lab", density: 0 };
+        : spec.scene.family === "sandbox"
+          ? {
+              name:
+                spec.scene.centralGravity > 0
+                  ? "Orbital field"
+                  : spec.scene.airDensity > 0
+                    ? "Air"
+                    : "Vacuum",
+              density: spec.scene.airDensity,
+            }
+          : { name: "Idealized lab", density: 0 };
 
   const run = () => {
     if (!selected || capturing) return;

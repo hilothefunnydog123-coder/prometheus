@@ -264,20 +264,17 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json(cached, { status: 200 });
     }
 
-    // Text questions can be routed deterministically from the three supported
-    // mechanics families. Reserve the model-backed analyzer for diagrams,
+    // Text questions are routed deterministically: a keyword match to a
+    // specialised family (drop, projectile, pendulum) becomes a hint, and
+    // everything else is left as "unknown" so the compiler builds a generic
+    // sandbox world for it. Reserve the model-backed analyzer for diagrams,
     // where visual context is necessary. This keeps normal requests to one
     // provider call so they finish within the hosting function's time limit.
+    // No mechanics question is rejected up front any more — the compiler can
+    // express any of them as a live sandbox experiment.
     const intent = image
       ? await analyzeInput(prompt, image, { signal: request.signal })
       : heuristicIntent(prompt, false);
-    if (intent.family === "unknown") {
-      return errorResponse(
-        422,
-        "unsupported_material",
-        "This material is not supported yet. Counterfactual Lab covers three experiment families: drop (free fall), projectile motion, and pendulum. Try a question about one of those.",
-      );
-    }
     const response = await compileExperiment(
       intent,
       { gradeBand, sourceQuestion: prompt },

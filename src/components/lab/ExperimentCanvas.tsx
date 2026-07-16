@@ -32,8 +32,10 @@ import type {
   ExperimentSpec,
   PendulumScene as PendulumSceneSpec,
   ProjectileScene as ProjectileSceneSpec,
+  SandboxScene as SandboxSceneSpec,
 } from "@/lib/contracts/experiment";
 import { buildEvidence, type SimulationEvidence } from "@/lib/physics/evidence";
+import { simulateSandbox, type SandboxTrajectory } from "@/lib/physics/sandbox";
 
 type ExperimentCanvasProps = {
   spec: ExperimentSpec;
@@ -303,6 +305,214 @@ function PendulumScene({ scene, launched }: { scene: PendulumSceneSpec; launched
   );
 }
 
+/** Camera + look-at target framing the sandbox's initial layout and floor. */
+function sandboxFraming(scene: SandboxSceneSpec) {
+  const xs = scene.bodies.map((body) => body.position.x);
+  const ys = scene.bodies.map((body) => body.position.y);
+  if (scene.hasFloor) ys.push(0);
+  if (scene.centralGravity > 0) {
+    xs.push(0);
+    ys.push(0);
+  }
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const spread = Math.max(maxX - minX, maxY - minY, 6);
+  const distance = spread * 1.45 + 9;
+  return {
+    camera: {
+      position: [centerX + spread * 0.12, centerY + spread * 0.12, distance] as [
+        number,
+        number,
+        number,
+      ],
+      fov: 46,
+    },
+    target: [centerX, centerY, 0] as [number, number, number],
+  };
+}
+
+function sampleTrajectory(trajectory: SandboxTrajectory, time: number) {
+  const frames = trajectory.frames;
+  const clamped = Math.max(0, Math.min(time, trajectory.duration));
+  const position =
+    trajectory.duration > 0
+      ? (clamped / trajectory.duration) * (frames.length - 1)
+      : 0;
+  const lower = Math.floor(position);
+  const upper = Math.min(frames.length - 1, lower + 1);
+  const blend = position - lower;
+  return frames[lower]!.bodies.map((body, index) => {
+    const next = frames[upper]!.bodies[index]!;
+    return {
+      x: body.x + (next.x - body.x) * blend,
+      y: body.y + (next.y - body.y) * blend,
+    };
+  });
+}
+
+const SANDBOX_UP = new THREE.Vector3(0, 1, 0);
+
+function SandboxScene({
+  spec,
+  scene,
+  launched,
+  capturing,
+  paused,
+  onComplete,
+}: {
+  spec: ExperimentSpec;
+  scene: SandboxSceneSpec;
+  launched: boolean;
+  capturing: boolean;
+  paused: boolean;
+  onComplete: (evidence: SimulationEvidence) => void;
+}) {
+  const trajectory = useMemo(() => simulateSandbox(scene), [scene]);
+  const evidence = useMemo(() => buildEvidence(spec), [spec]);
+  const bodyRefs = useRef<(THREE.Group | null)[]>([]);
+  const springRefs = useRef<(THREE.Object3D | null)[]>([]);
+  const elapsed = useRef(0);
+  const completed = useRef(false);
+  const midpoint = useRef(new THREE.Vector3());
+  const direction = useRef(new THREE.Vector3());
+  const bodyIndexById = useMemo(() => {
+    const map = new Map<string, number>();
+    scene.bodies.forEach((body, index) => map.set(body.id, index));
+    return map;
+  }, [scene]);
+
+  // The animation plays the exact server trajectory, time-scaled so even a
+  // 20 s experiment resolves within a few seconds of wall-clock.
+  const wallSeconds = Math.min(trajectory.duration, 8);
+  const rate = trajectory.duration / wallSeconds;
+
+  useEffect(() => {
+    elapsed.current = 0;
+    completed.current = false;
+  }, [scene]);
+
+  useFrame((_, delta) => {
+    if (capturing && !paused && !completed.current) {
+      elapsed.current = Math.min(
+        elapsed.current + Math.min(delta, 0.05) * rate,
+        trajectory.duration,
+      );
+    }
+    const time = capturing ? elapsed.current : 0;
+    const positions = sampleTrajectory(trajectory, time);
+    for (let i = 0; i < positions.length; i += 1) {
+      const group = bodyRefs.current[i];
+      if (group) group.position.set(positions[i]!.x, positions[i]!.y, 0);
+    }
+    scene.springs.forEach((spring, index) => {
+      const mesh = springRefs.current[index];
+      if (!mesh) return;
+      const a = bodyIndexById.get(spring.bodyA);
+      if (a === undefined) return;
+      const start = positions[a]!;
+      const end =
+        spring.bodyB === null
+          ? spring.anchor
+          : (() => {
+              const b = bodyIndexById.get(spring.bodyB!);
+              return b === undefined ? spring.anchor : positions[b]!;
+            })();
+      direction.current.set(end.x - start.x, end.y - start.y, 0);
+      const length = Math.max(direction.current.length(), 1e-4);
+      midpoint.current.set((start.x + end.x) / 2, (start.y + end.y) / 2, 0);
+      mesh.position.copy(midpoint.current);
+      mesh.scale.set(1, length, 1);
+      mesh.quaternion.setFromUnitVectors(
+        SANDBOX_UP,
+        direction.current.divideScalar(length),
+      );
+    });
+    if (
+      capturing &&
+      !completed.current &&
+      elapsed.current >= trajectory.duration - 1e-6
+    ) {
+      completed.current = true;
+      onComplete(evidence);
+    }
+  });
+
+  const initial = sampleTrajectory(trajectory, launched ? 0 : 0);
+
+  return (
+    <group>
+      {scene.hasFloor && (
+        <>
+          <mesh receiveShadow position={[0, -0.12, 0]}>
+            <boxGeometry args={[60, 0.24, 12]} />
+            <meshStandardMaterial color="#080d16" roughness={0.82} metalness={0.24} />
+          </mesh>
+          <gridHelper args={[60, 40, "#1f8399", "#13212c"]} position={[0, 0.01, 0]} />
+        </>
+      )}
+      {scene.centralGravity > 0 && (
+        <group>
+          <mesh>
+            <sphereGeometry args={[0.55, 32, 24]} />
+            <meshStandardMaterial color="#ffce6b" emissive="#ff8a3d" emissiveIntensity={1.6} />
+          </mesh>
+          <pointLight color="#ffb15c" intensity={5} distance={40} />
+        </group>
+      )}
+      {scene.springs.map((spring, index) => (
+        <mesh
+          key={spring.id}
+          ref={(element) => {
+            springRefs.current[index] = element;
+          }}
+        >
+          <cylinderGeometry args={[0.05, 0.05, 1, 10]} />
+          <meshStandardMaterial color="#7a9daf" metalness={0.7} roughness={0.3} />
+        </mesh>
+      ))}
+      {scene.bodies.map((body, index) => {
+        const visualRadius = Math.max(0.3, body.radius);
+        return (
+          <group
+            key={body.id}
+            ref={(element) => {
+              bodyRefs.current[index] = element;
+            }}
+            position={[initial[index]!.x, initial[index]!.y, 0]}
+          >
+            <mesh castShadow receiveShadow>
+              <sphereGeometry args={[visualRadius, 48, 36]} />
+              {body.fixed ? (
+                <meshStandardMaterial color={body.color} metalness={0.85} roughness={0.28} />
+              ) : (
+                <meshPhysicalMaterial
+                  color={body.color}
+                  emissive={body.color}
+                  emissiveIntensity={0.5}
+                  metalness={0.5}
+                  roughness={0.24}
+                  clearcoat={0.7}
+                />
+              )}
+            </mesh>
+            {!body.fixed && <pointLight color={body.color} intensity={2.1} distance={4.5} />}
+            <Html position={[0, visualRadius + 0.55, 0]} center distanceFactor={12}>
+              <div className="object-tag">
+                <strong>{body.label}</strong>
+                <span>{body.mass.toFixed(body.mass % 1 ? 1 : 0)} kg</span>
+              </div>
+            </Html>
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
 function SimulationTimer({
   active,
   spec,
@@ -378,7 +588,19 @@ function World({
           {spec.scene.family === "drop" && <DropScene scene={spec.scene} launched={launched} />}
           {spec.scene.family === "projectile" && <ProjectileScene scene={spec.scene} launched={launched} />}
           {spec.scene.family === "pendulum" && <PendulumScene scene={spec.scene} launched={launched} />}
-          <SimulationTimer active={capturing && !paused} spec={spec} onComplete={onComplete} />
+          {spec.scene.family === "sandbox" && (
+            <SandboxScene
+              spec={spec}
+              scene={spec.scene}
+              launched={launched}
+              capturing={capturing}
+              paused={paused}
+              onComplete={onComplete}
+            />
+          )}
+          {spec.scene.family !== "sandbox" && (
+            <SimulationTimer active={capturing && !paused} spec={spec} onComplete={onComplete} />
+          )}
           <SceneReady onReady={onReady} />
         </Physics>
       </Suspense>
@@ -390,11 +612,13 @@ function World({
         minPolarAngle={Math.PI * 0.18}
         maxPolarAngle={Math.PI * 0.48}
         target={
-          spec.scene.family === "projectile"
-            ? [3, 2.5, 0]
-            : spec.scene.family === "drop"
-              ? [0, 4.25, 0]
-              : [0, 3, 0]
+          spec.scene.family === "sandbox"
+            ? sandboxFraming(spec.scene).target
+            : spec.scene.family === "projectile"
+              ? [3, 2.5, 0]
+              : spec.scene.family === "drop"
+                ? [0, 4.25, 0]
+                : [0, 3, 0]
         }
       />
       {/* Cinematic grade: soft bloom on every emissive, a whisper of lens
@@ -454,11 +678,13 @@ export function ExperimentCanvas({ spec, runToken, launched, capturing, paused, 
   }
 
   const camera =
-    spec.scene.family === "projectile"
-      ? ({ position: [5, 8, 18], fov: 46 } as const)
-      : spec.scene.family === "drop"
-        ? ({ position: [6.3, 6.4, 11.4], fov: 37 } as const)
-        : ({ position: [8, 7, 13], fov: 44 } as const);
+    spec.scene.family === "sandbox"
+      ? sandboxFraming(spec.scene).camera
+      : spec.scene.family === "projectile"
+        ? ({ position: [5, 8, 18], fov: 46 } as const)
+        : spec.scene.family === "drop"
+          ? ({ position: [6.3, 6.4, 11.4], fov: 37 } as const)
+          : ({ position: [8, 7, 13], fov: 44 } as const);
   return (
     <>
       <Canvas

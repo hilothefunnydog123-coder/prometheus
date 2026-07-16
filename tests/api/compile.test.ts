@@ -10,6 +10,7 @@ import {
   createFetchStub,
   toolCallResponse,
 } from "@/lib/ai/testing/mock-provider";
+import { sandboxDropSpec } from "@/lib/ai/testing/sandbox-fixture";
 
 /**
  * Route tests run fully offline by default: credentials are cleared and the
@@ -242,24 +243,27 @@ describe("POST /api/compile", () => {
     );
   });
 
-  it("returns 422 with the supported families for unsupported material", async () => {
+  it("compiles a non-classic mechanics question into a generated sandbox experiment", async () => {
     vi.stubEnv("FEATHERLESS_API_KEY", "test-key");
-    const stub = createFetchStub([]);
+    const stub = createFetchStub([
+      toolCallResponse("emit_experiment_spec", sandboxDropSpec()),
+    ]);
     vi.stubGlobal("fetch", stub.fetchImpl);
     const response = await POST(
       multipartRequest({
-        prompt: "help me balance chemical equations",
+        prompt: "Do heavier balls fall faster than lighter balls?",
         gradeBand: "8-10",
       }),
     );
-    expect(response.status).toBe(422);
-    const body = (await response.json()) as ErrorBody;
-    expect(body.error.code).toBe("unsupported_material");
-    for (const family of ["drop", "projectile", "pendulum"]) {
-      expect(body.error.message).toContain(family);
-    }
-    expect(stub.calls).toHaveLength(0);
-    expect(body.error.message).not.toMatch(/[<>]/);
+    // No up-front 422 dead-end any more: the compiler builds a live sandbox
+    // world instead of rejecting the question.
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as CompileResponse;
+    expect(body.provenance.source).toBe("generated");
+    expect(body.spec.scene.family).toBe("sandbox");
+    // The engine, not the model, owns the answer: a vacuum drop ties.
+    expect(body.spec.prediction.correctOutcomeKey).toBe("tie");
+    expect(stub.calls.length).toBeGreaterThan(0);
   });
 
   it("rejects non-multipart requests with 415", async () => {

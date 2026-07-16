@@ -4,8 +4,14 @@ import {
   type ExperimentSpec,
   type PendulumScene,
   type ProjectileScene,
+  type SandboxScene,
   type SceneSpec,
 } from "@/lib/contracts/experiment";
+import {
+  sandboxCompareBodies,
+  sandboxCompareChange,
+  SANDBOX_OUTCOME_KEYS,
+} from "./sandbox";
 import {
   DROP_TIE_TOLERANCE_SECONDS,
   MAX_SIMULATION_TIME_SECONDS,
@@ -34,6 +40,18 @@ export const OUTCOME_KEYS = {
   projectile: ["undershoot", "hit", "overshoot"],
   pendulum: ["period_increases", "period_decreases", "period_unchanged"],
 } as const;
+
+/**
+ * The three prediction outcome keys valid for a scene. Fixed per classic
+ * family; for sandbox it depends on the declared outcome rule (a body-vs-body
+ * comparison or a before-vs-after change).
+ */
+export function outcomeKeysFor(scene: SceneSpec): readonly string[] {
+  if (scene.family === "sandbox") {
+    return SANDBOX_OUTCOME_KEYS[scene.outcomeRule.kind];
+  }
+  return OUTCOME_KEYS[scene.family];
+}
 
 export const MAX_SIMULATED_SECONDS = MAX_SIMULATION_TIME_SECONDS;
 export const FIXED_TIMESTEP_S = 1 / 240;
@@ -185,6 +203,14 @@ export function pendulumComparisonOutcome(
   return determineOutcome(after, before) as PendulumOutcome;
 }
 
+/** Before/after outcome for a sandbox compare_change rule. */
+export function sandboxComparisonOutcome(
+  before: SandboxScene,
+  after: SandboxScene,
+): string {
+  return sandboxCompareChange(before, after);
+}
+
 /** Compute a prediction key from numeric scene data, never prompt wording. */
 export function expectedOutcomeKey(
   scene: SceneSpec,
@@ -194,6 +220,19 @@ export function expectedOutcomeKey(
     if (!change) return null;
     const after = applySceneChange(scene, change.targetPath, change.value);
     return pendulumComparisonOutcome(scene, after as PendulumScene);
+  }
+
+  if (scene.family === "sandbox") {
+    if (scene.outcomeRule.kind === "compare_change") {
+      if (!change) return null;
+      const after = applySceneChange(scene, change.targetPath, change.value);
+      return sandboxCompareChange(scene, after as SandboxScene);
+    }
+    // compare_bodies: computed directly from the (possibly changed) world.
+    const observedScene = change
+      ? (applySceneChange(scene, change.targetPath, change.value) as SandboxScene)
+      : scene;
+    return sandboxCompareBodies(observedScene);
   }
 
   const observed = change
@@ -207,7 +246,9 @@ export function expectedOutcomeKey(
 /** Duration of the physical event, or null only beyond solver safeguards. */
 export function sceneDuration(scene: SceneSpec): number | null {
   let duration: number;
-  if (scene.family === "drop") {
+  if (scene.family === "sandbox") {
+    duration = scene.duration;
+  } else if (scene.family === "drop") {
     duration = Math.max(
       ...scene.objects.map((body) =>
         dropFallTime(scene.height, scene.gravity, scene.airDensity, body),
@@ -257,7 +298,13 @@ export function finalizeCorrectness(spec: ExperimentSpec): ExperimentSpec {
             finalized.scene,
             changedScene as PendulumScene,
           )
-        : expectedOutcomeKey(changedScene);
+        : finalized.scene.family === "sandbox" &&
+            finalized.scene.outcomeRule.kind === "compare_change"
+          ? sandboxComparisonOutcome(
+              finalized.scene,
+              changedScene as SandboxScene,
+            )
+          : expectedOutcomeKey(changedScene);
     if (key === null) {
       throw new Error(
         `counterfactual "${counterfactual.id}" outcome is not computable`,
