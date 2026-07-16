@@ -7,9 +7,11 @@ counterfactuals ("what if it were heavier? on the Moon?"); a rubric-based
 evaluator grades your explanation; Bayesian Knowledge Tracing tracks what
 you've actually mastered.
 
-Student hackathon project. UI / 3D rendering is owned by Contributor A; the
-AI compiler, validation, evaluator, and mastery modules are owned by
-Contributor B.
+Student hackathon project. A complete 2D lab UI ships in
+`src/components/` (predict → watch & break → explain, with a canvas
+renderer and localStorage mastery). Contributor A's 3D renderer can replace
+the canvas stage; the AI compiler, validation, evaluator, simulation, and
+mastery modules are owned by Contributor B.
 
 ## Architecture
 
@@ -66,6 +68,8 @@ POST /api/evaluate (JSON) ──► evaluateExplanation ──► rubric + feedb
 | `src/lib/mastery/bkt.ts` | Bayesian Knowledge Tracing (pInit .25, pLearn .15, pGuess .20, pSlip .10), pure functions. |
 | `src/lib/mastery/store.ts` | Versioned, serializable per-concept mastery record for localStorage; total deserialization (corrupt data → fresh record); weakest-concept recommendations. |
 | `src/lib/api/rate-limit.ts` | In-memory sliding-window rate limiter keyed by forwarded client IP (30 req/min compile, 60 req/min evaluate). |
+| `src/lib/client/` | Browser-side helpers: typed API client, world→canvas view math, display formatters, localStorage mastery persistence. |
+| `src/components/` | The lab UI: ask/predict/break/explain flow, canvas experiment renderer (base + counterfactual worlds), rubric and mastery panels. |
 | `src/lib/fixtures/` | Golden fixtures (drop, projectile, pendulum) + deterministic closest-fixture selection. |
 | `src/lib/ai/eval/` | 30-case eval dataset + opt-in `npm run eval:compiler` script (never in CI). |
 | `src/app/api/compile/route.ts` | Multipart endpoint: text ≤ 2000 chars; optional PNG/JPEG/WebP image ≤ 4 MB. |
