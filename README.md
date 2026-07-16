@@ -130,7 +130,7 @@ Optional variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini text routing, compilation, grading, and default vision model |
+| `GEMINI_MODEL` | `gemini-3.5-flash` | Gemini text routing, compilation, grading, and default vision model |
 | `GEMINI_VISION_MODEL` | text-model value | Gemini uploaded-diagram model override |
 | `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai` | Gemini OpenAI-compatible provider URL |
 | `FEATHERLESS_TEXT_MODEL` | `Qwen/Qwen3-32B` | Text routing, compilation, and grading |

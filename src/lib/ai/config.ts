@@ -24,7 +24,7 @@ export const DEFAULT_TIMEOUT_MS = 20_000;
 /** Documented defaults; override with FEATHERLESS_TEXT_MODEL / _VISION_MODEL. */
 export const DEFAULT_TEXT_MODEL = "Qwen/Qwen3-32B";
 export const DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct";
-export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
 export const DEFAULT_NETLIFY_GATEWAY_MODEL = "gpt-5.4-mini";
 
 /**
