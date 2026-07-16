@@ -130,9 +130,10 @@ Optional variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini text routing, compilation, grading, and default vision model |
+| `GEMINI_MODEL` | `gemini-3.5-flash` | Gemini text routing, compilation, grading, and default vision model |
 | `GEMINI_VISION_MODEL` | text-model value | Gemini uploaded-diagram model override |
 | `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai` | Gemini OpenAI-compatible provider URL |
+| `GEMINI_TIMEOUT_MS` | `60000` | Gemini request timeout, capped at 120 seconds |
 | `FEATHERLESS_TEXT_MODEL` | `Qwen/Qwen3-32B` | Text routing, compilation, and grading |
 | `FEATHERLESS_VISION_MODEL` | `Qwen/Qwen3-VL-30B-A3B-Instruct` | Uploaded diagrams |
 | `FEATHERLESS_BASE_URL` | `https://api.featherless.ai/v1` | OpenAI-compatible provider URL |

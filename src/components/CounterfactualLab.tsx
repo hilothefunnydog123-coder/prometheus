@@ -42,6 +42,8 @@ import { experimentSpecSchema } from "@/lib/contracts/experiment";
 import {
   dropDemo,
   demoForPrompt,
+  pendulumDemo,
+  projectileDemo,
 } from "@/components/lab/demo-experiments";
 import { EvidenceChart } from "@/components/lab/EvidenceChart";
 import { SimulationErrorBoundary } from "@/components/lab/SimulationErrorBoundary";
@@ -90,9 +92,9 @@ const compileStages = [
 ];
 
 const exampleMeta = [
-  { id: "drop", icon: CircleGauge, kicker: "FREE FALL", question: "Do heavier objects fall faster?" },
-  { id: "projectile", icon: Target, kicker: "PROJECTILES", question: "Why does a thrown ball follow an arc?" },
-  { id: "pendulum", icon: Atom, kicker: "OSCILLATION", question: "Does a heavier pendulum swing faster?" },
+  { id: "drop", icon: CircleGauge, kicker: "FREE FALL", question: "Do heavier objects fall faster?", spec: dropDemo },
+  { id: "projectile", icon: Target, kicker: "PROJECTILES", question: "Why does a thrown ball follow an arc?", spec: projectileDemo },
+  { id: "pendulum", icon: Atom, kicker: "OSCILLATION", question: "Does a heavier pendulum swing faster?", spec: pendulumDemo },
 ];
 
 type ValidatedExampleOffer = {
@@ -214,6 +216,7 @@ function Landing({
   setError,
   validatedExampleOffer,
   openValidatedExample,
+  openExample,
   compile,
 }: {
   prompt: string;
@@ -228,6 +231,7 @@ function Landing({
   setError: (value: string | null) => void;
   validatedExampleOffer: ValidatedExampleOffer | null;
   openValidatedExample: () => void;
+  openExample: (spec: ExperimentSpec) => void;
   compile: (promptOverride?: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -347,8 +351,8 @@ function Landing({
           <p>Every lab begins with a prediction—because seeing an answer is not the same as changing your mind.</p>
         </div>
         <div className="example-grid">
-          {exampleMeta.map(({ id, icon: Icon, kicker, question }, index) => (
-            <button key={id} className="example-card" onClick={() => compile(question)}>
+          {exampleMeta.map(({ id, icon: Icon, kicker, question, spec }, index) => (
+            <button key={id} className="example-card" onClick={() => openExample(spec)}>
               <div className="example-index">0{index + 1}</div>
               <Icon size={22} />
               <span>{kicker}</span>
@@ -1131,13 +1135,13 @@ export function CounterfactualLab() {
     setPhase("predicting");
   };
 
-  const openValidatedExample = () => {
-    if (!validatedExampleOffer) return;
-    const example = structuredClone(validatedExampleOffer.spec);
+  const openExample = (
+    selectedSpec: ExperimentSpec,
+    notice = "Validated demo example · explicitly selected · pre-coded, not AI-generated",
+  ) => {
+    const example = structuredClone(selectedSpec);
     setPrompt(canonicalQuestionFor(example));
-    setCompilerNotice(
-      "Validated demo example · explicitly selected · not generated for the prior question",
-    );
+    setCompilerNotice(notice);
     setSpec(example);
     setError(null);
     setValidatedExampleOffer(null);
@@ -1145,6 +1149,14 @@ export function CounterfactualLab() {
     if (imagePreview) URL.revokeObjectURL(imagePreview);
     setImagePreview(null);
     setPhase("predicting");
+  };
+
+  const openValidatedExample = () => {
+    if (!validatedExampleOffer) return;
+    openExample(
+      validatedExampleOffer.spec,
+      "Validated demo example · explicitly selected · not generated for the prior question",
+    );
   };
 
   const inLab = phase !== "input" && phase !== "compiling";
@@ -1165,10 +1177,11 @@ export function CounterfactualLab() {
           setError={setError}
           validatedExampleOffer={validatedExampleOffer}
           openValidatedExample={openValidatedExample}
+          openExample={openExample}
           compile={compile}
         />
       )}
-      {phase === "compiling" && <><Landing prompt={prompt} setPrompt={setPrompt} gradeBand={gradeBand} setGradeBand={setGradeBand} image={image} imagePreview={imagePreview} setImage={setImage} setImagePreview={setImagePreview} error={error} setError={setError} validatedExampleOffer={validatedExampleOffer} openValidatedExample={openValidatedExample} compile={compile} /><CompilerOverlay stage={stage} /></>}
+      {phase === "compiling" && <><Landing prompt={prompt} setPrompt={setPrompt} gradeBand={gradeBand} setGradeBand={setGradeBand} image={image} imagePreview={imagePreview} setImage={setImage} setImagePreview={setImagePreview} error={error} setError={setError} validatedExampleOffer={validatedExampleOffer} openValidatedExample={openValidatedExample} openExample={openExample} compile={compile} /><CompilerOverlay stage={stage} /></>}
       {inLab && (
         <LabWorkspace
           key={spec.id}
