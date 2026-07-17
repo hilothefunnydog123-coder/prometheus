@@ -4114,7 +4114,7 @@ button:disabled {
   font-family: var(--font-geist-mono);
 }
 
-@media (min-width: 1100px) {
+@media (min-width: 1440px) {
   .telemetry-hud {
     display: grid;
     gap: 9px;
@@ -4125,14 +4125,14 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: 0.16em;
   color: #71838c;
 }
 
 .telemetry-head b {
   margin-left: auto;
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.14em;
   color: #8fe6ff;
@@ -4168,20 +4168,20 @@ button:disabled {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 7px;
+  font-size: 9px;
   letter-spacing: 0.12em;
   color: #84969e;
 }
 .telemetry-cell b {
   margin-left: auto;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: #e9f4fa;
   font-variant-numeric: tabular-nums;
 }
 .telemetry-cell em {
   font-style: normal;
-  font-size: 7px;
+  font-size: 9px;
   color: #71838c;
 }
 .telemetry-time b { color: #8fe6ff; }
@@ -4198,7 +4198,7 @@ button:disabled {
   max-height: 88px;
   overflow: hidden;
   white-space: pre;
-  font-size: 8px;
+  font-size: 9px;
   line-height: 1.7;
   color: #6f8b96;
   mask-image: linear-gradient(180deg, #000 52%, transparent 100%);
@@ -4339,5 +4339,253 @@ button:disabled {
   .mechanism-card,
   .mechanism-card:hover {
     transform: none;
+  }
+}
+
+/* ============================================================
+   SUBMISSION POLISH · responsive learning + accessible telemetry
+   ============================================================ */
+
+.hero-mobile-cta,
+.prediction-jump {
+  display: none;
+}
+
+/* The telemetry becomes an instrument rail instead of covering the world.
+   It only exists after a prediction is locked and only uses the rail at sizes
+   that leave enough space for both the scene and notebook. */
+@media (min-width: 1440px) {
+  .canvas-shell.telemetry-visible .experiment-canvas {
+    right: auto !important;
+    width: calc(100% - 252px) !important;
+  }
+
+  .telemetry-hud {
+    inset: 0 0 0 auto;
+    box-sizing: border-box;
+    width: 252px;
+    padding: 92px 14px 116px;
+    align-content: start;
+    overflow: hidden;
+    border-width: 0 0 0 1px;
+    border-radius: 0;
+    background: rgba(4, 8, 13, 0.96);
+  }
+
+  .canvas-shell.telemetry-visible .environment-readout {
+    right: 14px;
+  }
+
+  .canvas-shell.telemetry-visible .scene-legend {
+    right: 14px;
+    bottom: 14px;
+    width: 224px;
+  }
+}
+
+.experiment-readout small {
+  font-size: 8px;
+}
+
+.experiment-readout > span {
+  font-size: 10px;
+}
+
+.environment-readout span {
+  font-size: 10px;
+}
+
+.scene-legend > small {
+  font-size: 8px;
+}
+
+.scene-legend span {
+  font-size: 9px;
+}
+
+.scene-legend b {
+  font-size: 8px;
+}
+
+.prediction-jump {
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 138, 61, 0.38);
+  border-radius: 8px;
+  background: rgba(255, 111, 46, 0.1);
+  color: #ffc49f;
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+@media (max-width: 1040px) {
+  .simulation-stage {
+    min-height: 640px;
+  }
+
+  .learning-panel {
+    scroll-margin-top: calc(var(--header-h) + 8px);
+  }
+}
+
+@media (max-width: 700px) {
+  .simulation-stage {
+    height: 540px;
+    min-height: 540px;
+    grid-template-rows: 36px minmax(220px, 1fr) 52px 205px;
+  }
+
+  .control-deck {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .control-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .control-heading small {
+    display: none;
+  }
+
+  .prediction-jump {
+    display: inline-flex;
+  }
+
+  .learning-panel {
+    min-height: 620px;
+  }
+}
+
+@media (max-width: 620px) {
+  .hero-panel .hero-section {
+    min-height: auto;
+    gap: 24px;
+    padding: 26px 20px 24px;
+  }
+
+  .hero-chip {
+    margin-bottom: 14px;
+  }
+
+  .hero-badge {
+    margin-bottom: 16px;
+  }
+
+  .hero-copy h1 {
+    font-size: clamp(42px, 12vw, 48px);
+    line-height: 0.9;
+  }
+
+  .hero-copy h1 em {
+    margin-top: 6px;
+  }
+
+  .hero-lede {
+    margin: 20px 0 14px;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  .hero-mobile-cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 11px 15px;
+    border: 1px solid #ff9d62;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #ff8a3d, #ff6334);
+    color: #170905;
+    font-size: 12px;
+    font-weight: 720;
+    box-shadow: 0 10px 32px rgba(255, 101, 48, 0.22);
+    cursor: pointer;
+  }
+
+  .prompt-console {
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  .console-header {
+    margin-bottom: 16px;
+  }
+
+  .prompt-scope {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .prompt-console textarea {
+    min-height: 82px;
+    padding: 12px;
+  }
+
+  .starter-questions {
+    margin-top: 8px;
+  }
+
+  .starter-questions > div {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 3px;
+    scrollbar-width: thin;
+  }
+
+  .starter-questions button {
+    flex: none;
+    max-width: 250px;
+  }
+
+  .question-limit span {
+    display: none;
+  }
+
+  .question-limit {
+    justify-content: flex-end;
+  }
+
+  .console-actions {
+    flex-direction: row;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .upload-button {
+    width: auto;
+    padding: 10px;
+  }
+
+  .compile-button {
+    padding: 11px 12px;
+  }
+
+  .privacy-note {
+    margin-top: 10px;
+    font-size: 8.5px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-mobile-cta,
+  .prediction-jump,
+  .telemetry-hud {
+    scroll-behavior: auto;
+    transition: none;
   }
 }

@@ -33,6 +33,7 @@ import {
   useRef,
   useState,
   type ElementRef,
+  type ReactElement,
   type RefObject,
 } from "react";
 import * as THREE from "three";
@@ -68,6 +69,83 @@ type ExperimentCanvasProps = {
 
 type VectorTuple = readonly [number, number, number];
 
+type VisualProfile = {
+  reducedMotion: boolean;
+  quality: "full" | "balanced";
+  showTelemetry: boolean;
+};
+
+type NavigatorWithDeviceHints = Navigator & {
+  deviceMemory?: number;
+  connection?: { saveData?: boolean };
+};
+
+function useVisualProfile(): VisualProfile {
+  const [profile, setProfile] = useState<VisualProfile>({
+    reducedMotion: false,
+    quality: "full",
+    showTelemetry: true,
+  });
+
+  useEffect(() => {
+    const reducedMotionQuery = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    );
+    const update = () => {
+      const device = navigator as NavigatorWithDeviceHints;
+      const reducedMotion = reducedMotionQuery.matches;
+      const compactViewport = window.innerWidth < 900;
+      const constrainedDevice =
+        (device.hardwareConcurrency > 0 && device.hardwareConcurrency <= 4) ||
+        (typeof device.deviceMemory === "number" && device.deviceMemory <= 4) ||
+        Boolean(device.connection?.saveData);
+      setProfile({
+        reducedMotion,
+        quality:
+          reducedMotion || compactViewport || constrainedDevice
+            ? "balanced"
+            : "full",
+        showTelemetry: !reducedMotion && window.innerWidth >= 1440,
+      });
+    };
+    update();
+    reducedMotionQuery.addEventListener("change", update);
+    window.addEventListener("resize", update);
+    return () => {
+      reducedMotionQuery.removeEventListener("change", update);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+
+  return profile;
+}
+
+function MotionTrail({
+  enabled,
+  width,
+  length,
+  color,
+  children,
+}: {
+  enabled: boolean;
+  width: number;
+  length: number;
+  color: string;
+  children: ReactElement;
+}) {
+  if (!enabled) return children;
+  return (
+    <Trail
+      width={width}
+      length={length}
+      color={color}
+      attenuation={(trailWidth) => trailWidth * trailWidth}
+    >
+      {children}
+    </Trail>
+  );
+}
+
 function InteractiveCameraControls({
   position,
   target,
@@ -80,18 +158,34 @@ function InteractiveCameraControls({
   const controls = useRef<ElementRef<typeof OrbitControls>>(null);
   const appliedCommandToken = useRef<number | null>(null);
   const appliedFraming = useRef("");
-  const { camera } = useThree();
+  const { camera, size } = useThree();
 
   useEffect(() => {
     const orbit = controls.current;
     if (!orbit) return;
-    const framingKey = `${position.join(",")}|${target.join(",")}`;
+    const aspect = size.width / Math.max(size.height, 1);
+    const responsiveDistanceScale = Math.max(1, 1.45 / aspect);
+    const framingKey = `${position.join(",")}|${target.join(",")}|${responsiveDistanceScale.toFixed(3)}`;
     const framingChanged = appliedFraming.current !== framingKey;
     const commandChanged = appliedCommandToken.current !== command.token;
     if (!framingChanged && !commandChanged) return;
 
     if (framingChanged || command.type === "reset") {
-      camera.position.set(position[0], position[1], position[2]);
+      const responsivePosition = new THREE.Vector3(
+        position[0],
+        position[1],
+        position[2],
+      );
+      const responsiveTarget = new THREE.Vector3(
+        target[0],
+        target[1],
+        target[2],
+      );
+      responsivePosition
+        .sub(responsiveTarget)
+        .multiplyScalar(responsiveDistanceScale)
+        .add(responsiveTarget);
+      camera.position.copy(responsivePosition);
       orbit.target.set(target[0], target[1], target[2]);
     } else {
       const offset = camera.position.clone().sub(orbit.target);
@@ -117,6 +211,8 @@ function InteractiveCameraControls({
     command.token,
     command.type,
     position,
+    size.height,
+    size.width,
     target,
   ]);
 
@@ -185,7 +281,15 @@ function MeasurementPylon({ x, height, label }: { x: number; height: number; lab
   );
 }
 
-function DropScene({ scene, launched }: { scene: DropSceneSpec; launched: boolean }) {
+function DropScene({
+  scene,
+  launched,
+  motionEffects,
+}: {
+  scene: DropSceneSpec;
+  launched: boolean;
+  motionEffects: boolean;
+}) {
   return (
     <group position={[0, 0, 0]}>
       <LabFloor span={16} />
@@ -212,11 +316,11 @@ function DropScene({ scene, launched }: { scene: DropSceneSpec; launched: boolea
               <BallCollider args={[object.radius]} />
               {/* Glowing motion ribbon: the bloom pass turns the trail into
                   a light streak tracing the fall in real time. */}
-              <Trail
+              <MotionTrail
+                enabled={motionEffects}
                 width={2.4}
                 length={5}
                 color={object.color}
-                attenuation={(width) => width * width}
               >
                 <mesh castShadow receiveShadow>
                   <sphereGeometry args={[visualRadius, 64, 48]} />
@@ -229,7 +333,7 @@ function DropScene({ scene, launched }: { scene: DropSceneSpec; launched: boolea
                     clearcoat={0.75}
                   />
                 </mesh>
-              </Trail>
+              </MotionTrail>
               <pointLight color={object.color} intensity={2.8} distance={4.5} />
             </RigidBody>
             <Html position={[x, scene.height + visualRadius + 0.62, 0]} center distanceFactor={10}>
@@ -241,12 +345,27 @@ function DropScene({ scene, launched }: { scene: DropSceneSpec; launched: boolea
           </group>
         );
       })}
-      <Sparkles count={scene.airDensity > 0 ? 100 : 28} scale={[7, scene.height, 5]} size={1.2} speed={0.18} color="#5de1ff" opacity={scene.airDensity > 0 ? 0.55 : 0.16} />
+      <Sparkles
+        count={motionEffects ? (scene.airDensity > 0 ? 72 : 22) : 12}
+        scale={[7, scene.height, 5]}
+        size={1.2}
+        speed={motionEffects ? 0.18 : 0}
+        color="#5de1ff"
+        opacity={scene.airDensity > 0 ? 0.55 : 0.16}
+      />
     </group>
   );
 }
 
-function ProjectileBody({ scene, launched }: { scene: ProjectileSceneSpec; launched: boolean }) {
+function ProjectileBody({
+  scene,
+  launched,
+  motionEffects,
+}: {
+  scene: ProjectileSceneSpec;
+  launched: boolean;
+  motionEffects: boolean;
+}) {
   const body = useRef<RapierRigidBody>(null);
   useEffect(() => {
     if (!launched || !body.current) return;
@@ -272,11 +391,11 @@ function ProjectileBody({ scene, launched }: { scene: ProjectileSceneSpec; launc
       canSleep
     >
       {/* Comet streak: the projectile drags a bloom-lit ribbon along its arc. */}
-      <Trail
+      <MotionTrail
+        enabled={motionEffects}
         width={3.2}
         length={7}
         color={scene.object.color}
-        attenuation={(width) => width * width}
       >
         <mesh castShadow>
           <sphereGeometry args={[scene.object.radius, 40, 28]} />
@@ -288,7 +407,7 @@ function ProjectileBody({ scene, launched }: { scene: ProjectileSceneSpec; launc
             metalness={0.32}
           />
         </mesh>
-      </Trail>
+      </MotionTrail>
       <pointLight color={scene.object.color} intensity={2.6} distance={4} />
     </RigidBody>
   );
@@ -298,10 +417,12 @@ function ProjectileScene({
   scene,
   launched,
   showOutcomeGuides,
+  motionEffects,
 }: {
   scene: ProjectileSceneSpec;
   launched: boolean;
   showOutcomeGuides: boolean;
+  motionEffects: boolean;
 }) {
   const angle = (scene.launch.angleDegrees * Math.PI) / 180;
   const vx = scene.launch.speed * Math.cos(angle);
@@ -320,7 +441,11 @@ function ProjectileScene({
   return (
     <group position={[-8, 0, 0]}>
       <LabFloor span={34} />
-      <ProjectileBody scene={scene} launched={launched} />
+      <ProjectileBody
+        scene={scene}
+        launched={launched}
+        motionEffects={motionEffects}
+      />
       {showOutcomeGuides && <Line points={arc} color="#ff8a3d" transparent opacity={0.28} dashed dashScale={0.8} lineWidth={1.2} />}
       <group position={[target, 0.12, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <mesh castShadow>
@@ -342,7 +467,13 @@ function ProjectileScene({
   );
 }
 
-function DynamicPendulum({ scene }: { scene: PendulumSceneSpec }) {
+function DynamicPendulum({
+  scene,
+  motionEffects,
+}: {
+  scene: PendulumSceneSpec;
+  motionEffects: boolean;
+}) {
   const anchor = useRef<RapierRigidBody>(null!);
   const bob = useRef<RapierRigidBody>(null!);
   const angle = (scene.releaseAngleDegrees * Math.PI) / 180;
@@ -369,11 +500,11 @@ function DynamicPendulum({ scene }: { scene: PendulumSceneSpec }) {
           <meshStandardMaterial color="#7a9daf" metalness={0.8} roughness={0.25} />
         </mesh>
         {/* Pendulum bob paints its swing arc as a fading light ribbon. */}
-        <Trail
+        <MotionTrail
+          enabled={motionEffects}
           width={2.2}
           length={6}
           color={scene.bob.color}
-          attenuation={(width) => width * width}
         >
           <mesh castShadow>
             <sphereGeometry args={[scene.bob.radius, 42, 30]} />
@@ -386,7 +517,7 @@ function DynamicPendulum({ scene }: { scene: PendulumSceneSpec }) {
               clearcoat={0.8}
             />
           </mesh>
-        </Trail>
+        </MotionTrail>
         <pointLight color={scene.bob.color} intensity={1.7} distance={4} />
       </RigidBody>
     </>
@@ -408,7 +539,15 @@ function StaticPendulum({ scene }: { scene: PendulumSceneSpec }) {
   );
 }
 
-function PendulumScene({ scene, launched }: { scene: PendulumSceneSpec; launched: boolean }) {
+function PendulumScene({
+  scene,
+  launched,
+  motionEffects,
+}: {
+  scene: PendulumSceneSpec;
+  launched: boolean;
+  motionEffects: boolean;
+}) {
   return (
     <group>
       <LabFloor span={14} />
@@ -425,7 +564,11 @@ function PendulumScene({ scene, launched }: { scene: PendulumSceneSpec; launched
         <sphereGeometry args={[0.11, 22, 16]} />
         <meshStandardMaterial color="#ff8a3d" emissive="#ff8a3d" emissiveIntensity={2} />
       </mesh>
-      {launched ? <DynamicPendulum scene={scene} /> : <StaticPendulum scene={scene} />}
+      {launched ? (
+        <DynamicPendulum scene={scene} motionEffects={motionEffects} />
+      ) : (
+        <StaticPendulum scene={scene} />
+      )}
       <Html position={[0, 6.45, 0]} center distanceFactor={11}>
         <span className="scene-label">{scene.length.toFixed(1)} m · {scene.bob.mass.toFixed(1)} kg</span>
       </Html>
@@ -520,6 +663,7 @@ function SandboxScene({
   launched,
   capturing,
   paused,
+  motionEffects,
   onComplete,
 }: {
   spec: ExperimentSpec;
@@ -527,6 +671,7 @@ function SandboxScene({
   launched: boolean;
   capturing: boolean;
   paused: boolean;
+  motionEffects: boolean;
   onComplete: (evidence: SimulationEvidence) => void;
 }) {
   const trajectory = useMemo(() => simulateSandbox(scene), [scene]);
@@ -649,11 +794,11 @@ function SandboxScene({
               </mesh>
             ) : (
               /* Every free body traces its trajectory as a glowing ribbon. */
-              <Trail
+              <MotionTrail
+                enabled={motionEffects}
                 width={2.6}
                 length={6}
                 color={body.color}
-                attenuation={(width) => width * width}
               >
                 <mesh castShadow receiveShadow>
                   <sphereGeometry args={[visualRadius, 48, 36]} />
@@ -666,7 +811,7 @@ function SandboxScene({
                     clearcoat={0.7}
                   />
                 </mesh>
-              </Trail>
+              </MotionTrail>
             )}
             {!body.fixed && <pointLight color={body.color} intensity={2.1} distance={4.5} />}
             <Html position={[0, visualRadius + 0.55, 0]} center distanceFactor={12}>
@@ -868,13 +1013,17 @@ const TELEMETRY_LOG_LIMIT = 22;
 function TelemetryHud({
   spec,
   launched,
+  completed,
   paused,
   clock,
+  updateIntervalMs,
 }: {
   spec: ExperimentSpec;
   launched: boolean;
+  completed: boolean;
   paused: boolean;
   clock: RefObject<TelemetryClock>;
+  updateIntervalMs: number;
 }) {
   const evidence = useMemo<SimulationEvidence | null>(() => {
     try {
@@ -935,23 +1084,29 @@ function TelemetryHud({
   useEffect(() => {
     if (!evidence) return;
     let frame = 0;
+    let lastDraw = -Infinity;
     let lastLoggedT = -1;
     let logLines: string[] = [];
     const duration = evidence.duration;
-    const draw = () => {
+    const draw = (now: number) => {
+      if (now - lastDraw < updateIntervalMs) {
+        frame = requestAnimationFrame(draw);
+        return;
+      }
+      lastDraw = now;
       const rawT = clock.current.t;
       const t = Math.min(rawT, duration);
-      const done = launched && rawT >= duration;
+      const done = completed || (launched && rawT >= duration);
       if (statusRef.current) {
-        statusRef.current.textContent = !launched
-          ? "STANDBY"
+        statusRef.current.textContent = completed
+          ? "CAPTURED"
           : paused
             ? "PAUSED"
             : done
               ? "CAPTURED"
               : "STREAMING";
-        statusRef.current.dataset.state = !launched
-          ? "standby"
+        statusRef.current.dataset.state = completed
+          ? "done"
           : paused
             ? "paused"
             : done
@@ -982,6 +1137,13 @@ function TelemetryHud({
           context.lineTo(TELEMETRY_CHART_WIDTH, y);
           context.stroke();
         }
+        const revealX = completed
+          ? TELEMETRY_CHART_WIDTH
+          : Math.max(0, chart.toX(t));
+        context.save();
+        context.beginPath();
+        context.rect(0, 0, revealX, TELEMETRY_CHART_HEIGHT);
+        context.clip();
         for (const { channel, path, plotted } of chart.paths) {
           if (!plotted) continue;
           context.strokeStyle = channel.color;
@@ -990,6 +1152,7 @@ function TelemetryHud({
           context.stroke(path);
           context.globalAlpha = 1;
         }
+        context.restore();
         if (launched) {
           const cursorX = chart.toX(t);
           context.strokeStyle = "rgba(233, 244, 250, 0.4)";
@@ -1031,16 +1194,30 @@ function TelemetryHud({
     };
     frame = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frame);
-  }, [channels, chart, clock, evidence, launched, paused]);
+  }, [
+    channels,
+    chart,
+    clock,
+    completed,
+    evidence,
+    launched,
+    paused,
+    updateIntervalMs,
+  ]);
 
   if (!evidence || channels.length === 0) return null;
   return (
-    <div className="telemetry-hud" aria-hidden="true">
+    <div
+      className="telemetry-hud"
+      data-testid="live-telemetry"
+      data-telemetry-state={completed ? "captured" : "streaming"}
+      aria-hidden="true"
+    >
       <header className="telemetry-head">
         <i className="telemetry-pulse" />
         <span>LIVE TELEMETRY</span>
-        <b ref={statusRef} data-state="standby">
-          STANDBY
+        <b ref={statusRef} data-state={completed ? "done" : "live"}>
+          {completed ? "CAPTURED" : "STREAMING"}
         </b>
       </header>
       <div className="telemetry-grid">
@@ -1087,11 +1264,15 @@ function World({
   onComplete,
   onReady,
   telemetry,
+  visualProfile,
 }: ExperimentCanvasProps & {
   onReady: () => void;
   telemetry: RefObject<TelemetryClock>;
+  visualProfile: VisualProfile;
 }) {
   const framing = useMemo(() => experimentFraming(spec), [spec]);
+  const motionEffects =
+    visualProfile.quality === "full" && !visualProfile.reducedMotion;
   return (
     <>
       <color attach="background" args={["#04060d"]} />
@@ -1101,19 +1282,19 @@ function World({
       <Stars
         radius={120}
         depth={60}
-        count={2200}
+        count={visualProfile.quality === "full" ? 1600 : 650}
         factor={4}
         saturation={0}
         fade
-        speed={0.6}
+        speed={visualProfile.reducedMotion ? 0 : motionEffects ? 0.45 : 0.1}
       />
       {/* Ambient dust motes drifting through the whole lab volume. */}
       <Sparkles
-        count={90}
+        count={visualProfile.quality === "full" ? 48 : 16}
         scale={[26, 14, 18]}
         position={[0, 6, 0]}
         size={1.6}
-        speed={0.12}
+        speed={motionEffects ? 0.1 : 0}
         color="#8ea4ff"
         opacity={0.35}
       />
@@ -1126,15 +1307,28 @@ function World({
       <pointLight position={[0, 2, 9]} intensity={26} distance={26} color="#8ea4ff" />
       <Suspense fallback={null}>
         <Physics key={`${spec.id}-${runToken}-${launched ? "live" : "ready"}`} gravity={[0, -spec.scene.gravity, 0]} timeStep={1 / 60} interpolate colliders={false} paused={paused}>
-          {spec.scene.family === "drop" && <DropScene scene={spec.scene} launched={launched} />}
+          {spec.scene.family === "drop" && (
+            <DropScene
+              scene={spec.scene}
+              launched={launched}
+              motionEffects={motionEffects}
+            />
+          )}
           {spec.scene.family === "projectile" && (
             <ProjectileScene
               scene={spec.scene}
               launched={launched}
               showOutcomeGuides={showOutcomeGuides}
+              motionEffects={motionEffects}
             />
           )}
-          {spec.scene.family === "pendulum" && <PendulumScene scene={spec.scene} launched={launched} />}
+          {spec.scene.family === "pendulum" && (
+            <PendulumScene
+              scene={spec.scene}
+              launched={launched}
+              motionEffects={motionEffects}
+            />
+          )}
           {spec.scene.family === "sandbox" && (
             <SandboxScene
               spec={spec}
@@ -1142,6 +1336,7 @@ function World({
               launched={launched}
               capturing={capturing}
               paused={paused}
+              motionEffects={motionEffects}
               onComplete={onComplete}
             />
           )}
@@ -1159,22 +1354,24 @@ function World({
       />
       {/* Cinematic grade: soft bloom on every emissive, a whisper of lens
           fringing, and a vignette to seat the scene in the panel. */}
-      <EffectComposer multisampling={0}>
-        <Bloom
-          intensity={0.9}
-          luminanceThreshold={0.35}
-          luminanceSmoothing={0.85}
-          mipmapBlur
-          radius={0.7}
-        />
-        <ChromaticAberration
-          blendFunction={BlendFunction.NORMAL}
-          offset={[0.0006, 0.0009]}
-          radialModulation={false}
-          modulationOffset={0}
-        />
-        <Vignette eskil={false} offset={0.18} darkness={0.72} />
-      </EffectComposer>
+      {motionEffects && (
+        <EffectComposer multisampling={0}>
+          <Bloom
+            intensity={0.9}
+            luminanceThreshold={0.35}
+            luminanceSmoothing={0.85}
+            mipmapBlur
+            radius={0.7}
+          />
+          <ChromaticAberration
+            blendFunction={BlendFunction.NORMAL}
+            offset={[0.0006, 0.0009]}
+            radialModulation={false}
+            modulationOffset={0}
+          />
+          <Vignette eskil={false} offset={0.18} darkness={0.72} />
+        </EffectComposer>
+      )}
     </>
   );
 }
@@ -1192,6 +1389,9 @@ export function ExperimentCanvas({
   const [webglSupported, setWebglSupported] = useState<boolean | null>(null);
   const [sceneReady, setSceneReady] = useState(false);
   const telemetryClock = useRef<TelemetryClock>({ t: 0, running: false });
+  const visualProfile = useVisualProfile();
+  const telemetryVisible =
+    visualProfile.showTelemetry && (launched || showOutcomeGuides);
 
   useEffect(() => {
     const canvas = document.createElement("canvas");
@@ -1231,9 +1431,13 @@ export function ExperimentCanvas({
         className="experiment-canvas"
         data-outcome-guides={showOutcomeGuides ? "revealed" : "hidden"}
         data-camera-command={`${cameraCommand.type}-${cameraCommand.token}`}
-        dpr={[1, 1.5]}
+        data-visual-quality={visualProfile.quality}
+        data-motion-effects={
+          visualProfile.reducedMotion ? "reduced" : "standard"
+        }
+        dpr={visualProfile.quality === "full" ? [1, 1.35] : 1}
         camera={camera}
-        shadows="percentage"
+        shadows={visualProfile.quality === "full" ? "percentage" : false}
         gl={{
           antialias: true,
           powerPreference: "high-performance",
@@ -1253,15 +1457,20 @@ export function ExperimentCanvas({
           onComplete={onComplete}
           onReady={() => setSceneReady(true)}
           telemetry={telemetryClock}
+          visualProfile={visualProfile}
         />
       </Canvas>
-      <TelemetryHud
-        key={`${spec.id}-${runToken}`}
-        spec={spec}
-        launched={launched}
-        paused={paused}
-        clock={telemetryClock}
-      />
+      {telemetryVisible && (
+        <TelemetryHud
+          key={`${spec.id}-${runToken}`}
+          spec={spec}
+          launched={launched}
+          completed={showOutcomeGuides}
+          paused={paused}
+          clock={telemetryClock}
+          updateIntervalMs={visualProfile.quality === "full" ? 0 : 120}
+        />
+      )}
       {!sceneReady && (
         <div className="canvas-loading" role="status">
           <Atom className="loading-atom" size={34} aria-hidden="true" />

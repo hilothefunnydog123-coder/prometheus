@@ -513,6 +513,18 @@ function Landing({
     if (fileRef.current) fileRef.current.value = "";
   };
 
+  const focusExperimentConsole = () => {
+    const question = document.getElementById("experiment-question");
+    const reducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    question?.scrollIntoView({
+      behavior: reducedMotion ? "auto" : "smooth",
+      block: "center",
+    });
+    window.requestAnimationFrame(() => question?.focus({ preventScroll: true }));
+  };
+
   const onFile = async (file?: File) => {
     if (!file) return;
     try {
@@ -557,6 +569,13 @@ function Landing({
           <p className="hero-lede">
             Turn any mechanics question or textbook diagram into a living 3D experiment. Predict it. Run it. Prove it.
           </p>
+          <button
+            type="button"
+            className="hero-mobile-cta"
+            onClick={focusExperimentConsole}
+          >
+            Create an experiment <ArrowRight size={16} aria-hidden="true" />
+          </button>
         </div>
 
         <div className="prompt-console">
@@ -1480,6 +1499,23 @@ function LabWorkspace({
     }
   };
 
+  const jumpToPrediction = () => {
+    const panel = learningPanel.current;
+    if (!panel) return;
+    const reducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    panel.scrollIntoView({
+      behavior: reducedMotion ? "auto" : "smooth",
+      block: "start",
+    });
+    window.requestAnimationFrame(() => {
+      panel
+        .querySelector<HTMLElement>(".choice-list button:not([disabled])")
+        ?.focus({ preventScroll: true });
+    });
+  };
+
   const replay = () => {
     if (!selected || capturing) return;
     setEvidence(null);
@@ -1526,7 +1562,7 @@ function LabWorkspace({
           aria-label={simulationExpanded ? "Expanded simulation view" : undefined}
         >
           <div className="stage-toolbar">
-            <div><span className="status-light" /> {capturing ? paused ? "SIMULATION PAUSED" : "SIMULATION RUNNING" : hasRun ? "EVIDENCE CAPTURED" : "WORLD READY"}</div>
+            <div role="status" aria-live="polite" aria-atomic="true"><span className="status-light" /> {capturing ? paused ? "SIMULATION PAUSED" : "SIMULATION RUNNING" : hasRun ? "EVIDENCE CAPTURED" : "WORLD READY"}</div>
             <div className="stage-tools">
               <span><Crosshair size={11} aria-hidden="true" /> drag to orbit · scroll to point · right-drag to pan</span>
               <button type="button" title="Zoom in" aria-label="Zoom simulation in" onClick={() => commandCamera("zoom-in")}><ZoomIn size={14} /></button>
@@ -1544,7 +1580,9 @@ function LabWorkspace({
               </button>
             </div>
           </div>
-          <div className="canvas-shell">
+          <div
+            className={`canvas-shell ${launched || showOutcomeGuides ? "telemetry-visible" : ""}`}
+          >
             <SimulationErrorBoundary resetKey={`${spec.id}-${runToken}`}>
               <ExperimentCanvas
                 spec={spec}
@@ -1597,7 +1635,20 @@ function LabWorkspace({
             <button type="button" className="timeline-reset" aria-label="Reset experiment" onClick={resetSimulation}><RotateCcw size={15} /></button>
           </div>
           <div className="control-deck">
-            <div className="control-heading"><span><CircleGauge size={15} /> CONTROLLED VARIABLES</span><small>{canEditControls ? "change one thing at a time" : counterfactual ? "locked for transfer test" : "locked for this run"}</small></div>
+            <div className="control-heading">
+              <span><CircleGauge size={15} /> CONTROLLED VARIABLES</span>
+              <small>{canEditControls ? "change one thing at a time" : counterfactual ? "locked for transfer test" : "locked for this run"}</small>
+              {(phase === "predicting" || phase === "counterfactual-predicting") && (
+                <button
+                  type="button"
+                  className="prediction-jump"
+                  aria-controls="hypothesis-notebook"
+                  onClick={jumpToPrediction}
+                >
+                  Make prediction <ArrowRight size={13} aria-hidden="true" />
+                </button>
+              )}
+            </div>
             <div className="controls-grid">
               {spec.controls.map((control, index) => {
                 const reservedForRun = control.targetPath === reservedControlPath;
@@ -1623,9 +1674,14 @@ function LabWorkspace({
           </div>
         </section>
 
-        <aside ref={learningPanel} className="learning-panel">
+        <aside
+          ref={learningPanel}
+          id="hypothesis-notebook"
+          className="learning-panel"
+          aria-labelledby="notebook-title"
+        >
           <div className="notebook-header">
-            <div><FlaskConical size={17} /><span>{phase === "predicting" || phase === "counterfactual-predicting" ? "HYPOTHESIS NOTEBOOK" : "EVIDENCE NOTEBOOK"}</span></div>
+            <div id="notebook-title"><FlaskConical size={17} /><span>{phase === "predicting" || phase === "counterfactual-predicting" ? "HYPOTHESIS NOTEBOOK" : "EVIDENCE NOTEBOOK"}</span></div>
             <button type="button" onClick={clearRun}><RotateCcw size={13} /> Clear run</button>
           </div>
           <div className="notebook-scroll">

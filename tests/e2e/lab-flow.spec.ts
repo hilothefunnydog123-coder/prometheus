@@ -115,6 +115,7 @@ async function finishLearningLoop(page: Page, flow: FamilyFlow) {
     await expect(
       page.locator('[data-outcome-guides="hidden"]'),
     ).toHaveCount(1);
+    await expect(page.getByTestId("live-telemetry")).toHaveCount(0);
   }
 
   const run = page.getByRole("button", { name: "Lock prediction & run" });
@@ -141,6 +142,11 @@ async function finishLearningLoop(page: Page, flow: FamilyFlow) {
     await expect(
       page.locator('[data-outcome-guides="revealed"]'),
     ).toHaveCount(1);
+    await expect(page.getByTestId("live-telemetry")).toBeVisible();
+    await expect(page.getByTestId("live-telemetry")).toHaveAttribute(
+      "data-telemetry-state",
+      "captured",
+    );
   }
   await page
     .getByRole("textbox", {
@@ -541,13 +547,97 @@ test("landing and lab avoid horizontal overflow on a phone viewport", async ({
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
   ).toBe(true);
 
+  const mobileStart = page.getByRole("button", {
+    name: "Create an experiment",
+  });
+  await expect(mobileStart).toBeVisible();
+  await mobileStart.click();
+  await expect(
+    page.getByRole("textbox", { name: "What do you want to understand?" }),
+  ).toBeFocused();
+
   await page
     .getByRole("button", {
-      name: "01 FREE FALL Do heavier objects fall faster? Enter experiment",
+      name: "02 PROJECTILES Why does a thrown ball follow an arc? Enter experiment",
     })
     .click();
-  await expect(page.getByRole("heading", { name: "The Galileo Drop" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "The Hidden Second Motion" }),
+  ).toBeVisible();
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
   ).toBe(true);
+
+  const targetLabel = page.getByText("target · 18 m", { exact: true });
+  await expect(targetLabel).toBeVisible({ timeout: 10_000 });
+  const canvasBounds = await page
+    .locator(".canvas-shell")
+    .boundingBox();
+  const targetBounds = await targetLabel.boundingBox();
+  expect(canvasBounds).not.toBeNull();
+  expect(targetBounds).not.toBeNull();
+  expect(targetBounds!.x).toBeGreaterThanOrEqual(canvasBounds!.x + 2);
+  expect(targetBounds!.x + targetBounds!.width).toBeLessThanOrEqual(
+    canvasBounds!.x + canvasBounds!.width - 2,
+  );
+
+  const predictionJump = page.getByRole("button", {
+    name: "Make prediction",
+  });
+  await expect(predictionJump).toBeVisible();
+  await predictionJump.click();
+  await expect(
+    page.getByRole("button", { name: "A Before the target" }),
+  ).toBeFocused();
+  const notebookBounds = await page
+    .locator("#hypothesis-notebook")
+    .boundingBox();
+  expect(notebookBounds).not.toBeNull();
+  expect(notebookBounds!.y).toBeLessThan(844);
+});
+
+test("reduced-motion mode disables decorative WebGL effects and telemetry", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  await page
+    .getByRole("button", {
+      name: "02 PROJECTILES Why does a thrown ball follow an arc? Enter experiment",
+    })
+    .click();
+
+  const canvas = page.locator("[data-motion-effects]");
+  await expect(canvas).toHaveAttribute("data-motion-effects", "reduced");
+  await expect(canvas).toHaveAttribute("data-visual-quality", "balanced");
+  await page.getByRole("button", { name: "C Past the target" }).click();
+  await page.getByRole("button", { name: "Lock prediction & run" }).click();
+  await expect(page.getByTestId("live-telemetry")).toHaveCount(0);
+});
+
+test("prediction controls expose a complete keyboard and screen-reader contract", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#main-content")).toBeFocused();
+
+  await page
+    .getByRole("button", {
+      name: "02 PROJECTILES Why does a thrown ball follow an arc? Enter experiment",
+    })
+    .click();
+  await expect(page.locator("#hypothesis-notebook")).toHaveAttribute(
+    "aria-labelledby",
+    "notebook-title",
+  );
+  const choice = page.getByRole("button", { name: "C Past the target" });
+  await choice.focus();
+  await page.keyboard.press("Space");
+  await expect(choice).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByRole("button", { name: "Lock prediction & run" }),
+  ).toBeEnabled();
 });
