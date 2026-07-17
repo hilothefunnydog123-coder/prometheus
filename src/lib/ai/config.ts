@@ -14,7 +14,14 @@ export interface FeatherlessConfig {
   maxTokensParameter: "max_tokens" | "max_completion_tokens" | null;
   supportsTemperature: boolean;
   toolChoiceMode?: "named" | "auto";
-  structuredOutputMode?: "json-schema";
+  /**
+   * "json-schema": request response_format json_schema (Gemini structured
+   * output). "plain-json": send no response_format and instead describe the
+   * schema in an instruction message — the degraded mode the client falls
+   * back to when a provider rejects the schema-attached request with 400.
+   * Server-side Zod validation is authoritative in every mode.
+   */
+  structuredOutputMode?: "json-schema" | "plain-json";
   reasoningEffort?: "minimal" | "low" | "medium" | "high";
 }
 

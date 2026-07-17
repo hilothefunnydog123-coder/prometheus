@@ -168,13 +168,19 @@ export async function chatCompletion(
   const timeoutBudgetMs = normalizedTimeoutMs(config, request.timeoutMs);
   const deadline = Date.now() + timeoutBudgetMs;
 
-  // reasoning_effort is only accepted by thinking-capable models. When the
-  // configured model rejects the request outright (HTTP 400) and we sent that
-  // optional tuning parameter, retry once without it instead of failing the
-  // whole compilation — e.g. Gemini "flash" (non-thinking) models 400 on it.
+  // HTTP 400 degradation chain. Providers reject optional request features
+  // with a blanket 400: non-thinking Gemini models reject reasoning_effort,
+  // and Gemini structured output rejects schema constructs outside its
+  // supported dialect. Each 400 removes one optional feature and retries —
+  // ending, in the worst case, at a bare messages-only request (the shape the
+  // health probe exercises) with the schema described in an instruction
+  // message instead. Server-side Zod validation is authoritative in every
+  // mode, so degraded requests can never weaken the contract.
   let activeConfig = config;
+  let degradationsRemaining = 2;
+  let transientRetriesUsed = 0;
 
-  for (let attempt = 1; ; attempt += 1) {
+  for (;;) {
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) {
       throw new ProviderTimeoutError(timeoutBudgetMs);
@@ -192,18 +198,29 @@ export async function chatCompletion(
       if (
         error instanceof ProviderHttpError &&
         error.status === 400 &&
-        activeConfig.reasoningEffort &&
-        attempt < MAX_PROVIDER_ATTEMPTS
+        degradationsRemaining > 0
       ) {
-        activeConfig = { ...activeConfig, reasoningEffort: undefined };
-        continue;
+        if (activeConfig.reasoningEffort) {
+          activeConfig = { ...activeConfig, reasoningEffort: undefined };
+          degradationsRemaining -= 1;
+          continue;
+        }
+        if (
+          activeConfig.structuredOutputMode === "json-schema" &&
+          request.tool
+        ) {
+          activeConfig = { ...activeConfig, structuredOutputMode: "plain-json" };
+          degradationsRemaining -= 1;
+          continue;
+        }
       }
       const transient =
         error instanceof ProviderHttpError &&
         TRANSIENT_HTTP_STATUSES.has(error.status);
-      if (!transient || attempt >= MAX_PROVIDER_ATTEMPTS) {
+      if (!transient || transientRetriesUsed >= MAX_PROVIDER_ATTEMPTS - 1) {
         throw error;
       }
+      transientRetriesUsed += 1;
       const retryBudgetMs = deadline - Date.now();
       if (retryBudgetMs <= 0) {
         throw new ProviderTimeoutError(timeoutBudgetMs);
@@ -214,6 +231,17 @@ export async function chatCompletion(
       );
     }
   }
+}
+
+/**
+ * Strip a single wrapping markdown code fence (``` or ```json) from model
+ * text. Plain-JSON degraded responses often arrive fenced even when the
+ * instruction forbids it.
+ */
+function stripJsonFences(text: string): string {
+  const trimmed = text.trim();
+  const match = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(trimmed);
+  return match ? match[1]! : trimmed;
 }
 
 async function chatCompletionOnce(
@@ -240,9 +268,25 @@ async function chatCompletionOnce(
   }
   const startedAt = Date.now();
 
+  const messages =
+    request.tool && config.structuredOutputMode === "plain-json"
+      ? [
+          ...request.messages,
+          {
+            role: "user" as const,
+            content: [
+              `Return ONLY a single JSON object for "${request.tool.name}"`,
+              "with no markdown fences and no commentary. It must satisfy",
+              "this JSON Schema exactly:",
+              JSON.stringify(request.tool.parameters),
+            ].join(" "),
+          },
+        ]
+      : request.messages;
+
   const body: Record<string, unknown> = {
     model: request.model,
-    messages: request.messages,
+    messages,
   };
   if (config.maxTokensParameter) {
     body[config.maxTokensParameter] = request.maxTokens ?? 1600;
@@ -253,7 +297,7 @@ async function chatCompletionOnce(
   if (config.reasoningEffort) {
     body.reasoning_effort = config.reasoningEffort;
   }
-  if (request.tool) {
+  if (request.tool && config.structuredOutputMode !== "plain-json") {
     if (config.structuredOutputMode === "json-schema") {
       body.response_format = {
         type: "json_schema",
@@ -347,13 +391,17 @@ async function chatCompletionOnce(
         ? message.content
         : null;
     const structuredArguments =
-      request.tool && config.structuredOutputMode === "json-schema"
-        ? content
+      request.tool &&
+      (config.structuredOutputMode === "json-schema" ||
+        config.structuredOutputMode === "plain-json")
+        ? content !== null
+          ? stripJsonFences(content)
+          : null
         : rawArguments ?? null;
 
     if (
       request.tool &&
-      config.structuredOutputMode !== "json-schema" &&
+      config.structuredOutputMode === undefined &&
       message.tool_calls?.length &&
       !toolCall
     ) {
