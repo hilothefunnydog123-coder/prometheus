@@ -10,6 +10,7 @@ import {
 } from "./errors";
 import {
   chatCompletion,
+  resetLearnedProviderModes,
   type ChatRequest,
   type ToolDefinition,
 } from "./featherless-client";
@@ -43,6 +44,7 @@ const tool: ToolDefinition = {
 
 afterEach(() => {
   delete (globalThis as { window?: unknown }).window;
+  resetLearnedProviderModes();
 });
 
 describe("chatCompletion", () => {
@@ -196,10 +198,10 @@ describe("chatCompletion", () => {
     expect(stub.calls).toHaveLength(1);
   });
 
-  it("retries a 400 once without reasoning_effort for models that reject it", async () => {
-    // Gemini non-thinking models (e.g. gemini-2.0-flash) reject the optional
-    // reasoning_effort parameter with HTTP 400. The client must drop the
-    // parameter and retry instead of failing the compilation.
+  it("drops the schema first on a 400, keeping the reasoning cap", async () => {
+    // The schema-free health probe sends reasoning_effort and succeeds, so a
+    // 400 on a schema-carrying request implicates the schema. Dropping the
+    // schema first keeps the reasoning cap, which keeps generations fast.
     const geminiConfig: FeatherlessConfig = {
       ...config,
       maxTokensParameter: null,
@@ -208,7 +210,7 @@ describe("chatCompletion", () => {
       reasoningEffort: "minimal",
     };
     const stub = createFetchStub([
-      jsonResponse({ error: "reasoning_effort is not supported" }, 400),
+      jsonResponse({ error: "unsupported schema" }, 400),
       textResponse('{"hello":"gemini"}'),
     ]);
     const result = await chatCompletion(
@@ -218,19 +220,13 @@ describe("chatCompletion", () => {
     );
     expect(result.toolArguments).toBe('{"hello":"gemini"}');
     expect(stub.calls).toHaveLength(2);
-    expect(stub.calls[0]!.body.reasoning_effort).toBe("minimal");
-    expect(stub.calls[1]!.body.reasoning_effort).toBeUndefined();
-    // The rest of the request is unchanged on the retry.
-    expect(stub.calls[1]!.body.response_format).toEqual(
-      stub.calls[0]!.body.response_format,
-    );
+    expect(stub.calls[0]!.body.response_format).toBeDefined();
+    expect(stub.calls[1]!.body.response_format).toBeUndefined();
+    // The reasoning cap survives the schema degradation.
+    expect(stub.calls[1]!.body.reasoning_effort).toBe("minimal");
   });
 
-  it("degrades to a plain-JSON instruction when the provider rejects the schema", async () => {
-    // Gemini structured output 400s on schema constructs outside its dialect.
-    // After stripping reasoning_effort, the client's last resort is a bare
-    // request (the shape the health probe proves works) with the schema
-    // described in an instruction message and the JSON parsed from content.
+  it("memoizes the working degradation level for subsequent calls", async () => {
     const geminiConfig: FeatherlessConfig = {
       ...config,
       maxTokensParameter: null,
@@ -239,8 +235,45 @@ describe("chatCompletion", () => {
       reasoningEffort: "minimal",
     };
     const stub = createFetchStub([
-      jsonResponse({ error: "unsupported reasoning_effort" }, 400),
       jsonResponse({ error: "unsupported schema" }, 400),
+      textResponse('{"first":"call"}'),
+      textResponse('{"second":"call"}'),
+    ]);
+    const first = await chatCompletion(
+      geminiConfig,
+      { ...request, tool },
+      stub.fetchImpl,
+    );
+    expect(first.toolArguments).toBe('{"first":"call"}');
+    expect(stub.calls).toHaveLength(2);
+
+    // The second invocation starts directly in the learned plain-JSON mode:
+    // one request, no schema attached, reasoning cap intact.
+    const second = await chatCompletion(
+      geminiConfig,
+      { ...request, tool },
+      stub.fetchImpl,
+    );
+    expect(second.toolArguments).toBe('{"second":"call"}');
+    expect(stub.calls).toHaveLength(3);
+    expect(stub.calls[2]!.body.response_format).toBeUndefined();
+    expect(stub.calls[2]!.body.reasoning_effort).toBe("minimal");
+  });
+
+  it("degrades fully to a bare plain-JSON request on repeated 400s", async () => {
+    // Worst case: schema dropped, then reasoning_effort dropped — ending at a
+    // bare request (the shape the health probe proves works) with the schema
+    // described in an instruction message and fenced output unwrapped.
+    const geminiConfig: FeatherlessConfig = {
+      ...config,
+      maxTokensParameter: null,
+      supportsTemperature: false,
+      structuredOutputMode: "json-schema",
+      reasoningEffort: "minimal",
+    };
+    const stub = createFetchStub([
+      jsonResponse({ error: "unsupported schema" }, 400),
+      jsonResponse({ error: "unsupported reasoning_effort" }, 400),
       textResponse('```json\n{"hello":"degraded"}\n```'),
     ]);
     const result = await chatCompletion(
