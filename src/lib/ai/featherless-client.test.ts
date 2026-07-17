@@ -226,7 +226,46 @@ describe("chatCompletion", () => {
     );
   });
 
-  it("gives up after one stripped-parameter retry on repeated 400s", async () => {
+  it("degrades to a plain-JSON instruction when the provider rejects the schema", async () => {
+    // Gemini structured output 400s on schema constructs outside its dialect.
+    // After stripping reasoning_effort, the client's last resort is a bare
+    // request (the shape the health probe proves works) with the schema
+    // described in an instruction message and the JSON parsed from content.
+    const geminiConfig: FeatherlessConfig = {
+      ...config,
+      maxTokensParameter: null,
+      supportsTemperature: false,
+      structuredOutputMode: "json-schema",
+      reasoningEffort: "minimal",
+    };
+    const stub = createFetchStub([
+      jsonResponse({ error: "unsupported reasoning_effort" }, 400),
+      jsonResponse({ error: "unsupported schema" }, 400),
+      textResponse('```json\n{"hello":"degraded"}\n```'),
+    ]);
+    const result = await chatCompletion(
+      geminiConfig,
+      { ...request, tool },
+      stub.fetchImpl,
+    );
+    // Fenced output is unwrapped before parsing.
+    expect(result.toolArguments).toBe('{"hello":"degraded"}');
+    expect(stub.calls).toHaveLength(3);
+    // Final request carries no schema and no reasoning_effort...
+    expect(stub.calls[2]!.body.response_format).toBeUndefined();
+    expect(stub.calls[2]!.body.tools).toBeUndefined();
+    expect(stub.calls[2]!.body.reasoning_effort).toBeUndefined();
+    // ...and instead describes the schema in an appended instruction message.
+    const messages = stub.calls[2]!.body.messages as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(messages.length).toBe(request.messages.length + 1);
+    expect(messages.at(-1)!.content).toContain("JSON Schema");
+    expect(messages.at(-1)!.content).toContain("some_tool");
+  });
+
+  it("gives up after exhausting the 400 degradation chain", async () => {
     const geminiConfig: FeatherlessConfig = {
       ...config,
       maxTokensParameter: null,
@@ -237,6 +276,7 @@ describe("chatCompletion", () => {
     const stub = createFetchStub([
       jsonResponse({ error: "bad request" }, 400),
       jsonResponse({ error: "still bad" }, 400),
+      jsonResponse({ error: "always bad" }, 400),
     ]);
     const error = await chatCompletion(
       geminiConfig,
@@ -245,7 +285,8 @@ describe("chatCompletion", () => {
     ).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ProviderHttpError);
     expect((error as ProviderHttpError).status).toBe(400);
-    expect(stub.calls).toHaveLength(2);
+    // reasoning_effort stripped, then schema dropped, then surrender.
+    expect(stub.calls).toHaveLength(3);
   });
 
   it("does not retry timeouts", async () => {
