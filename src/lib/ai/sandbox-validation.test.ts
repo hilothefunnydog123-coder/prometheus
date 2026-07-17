@@ -40,6 +40,31 @@ describe("sandbox spec validation and finalization", () => {
     expect(errors).toEqual([]);
   });
 
+  it('normalizes the spring bodyB "anchor" sentinel to null before validation', () => {
+    // Gemini structured output cannot express null, so the tool schema uses
+    // the literal string "anchor" for a spring end fixed to its anchor point.
+    const spec = sandboxDropSpec();
+    if (spec.scene.family !== "sandbox") throw new Error("sandbox fixture");
+    spec.scene.springs = [
+      {
+        id: "tether",
+        bodyA: "heavy",
+        // Raw model output: the sentinel string instead of null.
+        bodyB: "anchor" as unknown as null,
+        anchor: { x: -2, y: 14 },
+        stiffness: 0,
+        restLength: 2,
+        damping: 0,
+      },
+    ];
+    const result = validateRendererExperimentSpec(normalizeGeneratedSpec(spec));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.scene.family).toBe("sandbox");
+    if (result.spec.scene.family !== "sandbox") return;
+    expect(result.spec.scene.springs[0]!.bodyB).toBeNull();
+  });
+
   it("rejects a base compare_bodies prediction that carries a stray testChange survivor", () => {
     const spec = vacuumDropSandbox() as ExperimentSpec;
     // compare_bodies base predictions describe the base scene; a testChange is

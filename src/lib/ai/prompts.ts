@@ -121,8 +121,9 @@ export const COMPILE_SYSTEM_PROMPT = [
   "  airDensity>0 and a body dragCoefficient>0), Hooke springs, an",
   "  inverse-square attractor of strength centralGravity at the origin (0,0),",
   "  a floor with restitution, and pairwise collisions when collisions=true.",
-  "- A spring connects bodyA to bodyB, or to its fixed anchor point when bodyB",
-  "  is null. restLength is its natural length; stiffness is k; damping resists",
+  '- A spring connects bodyA to bodyB; set bodyB to the literal string "anchor"',
+  "  to attach that end to the spring's fixed anchor point instead of a body.",
+  "  restLength is its natural length; stiffness is k; damping resists",
   "  stretching. For a mass-on-spring oscillator, offset the body from the",
   "  equilibrium (anchor distance = restLength) by a small amount.",
   "- For an orbit, set gravity=0, centralGravity>0, place the body at radius r",
@@ -301,11 +302,15 @@ const sandboxSpringJsonSchema = {
   properties: {
     id: idSchema,
     bodyA: { type: "string", minLength: 1, maxLength: 40 },
+    // Gemini structured output rejects schemas containing a null type, so the
+    // "attach to the fixed anchor point" case is expressed with the literal
+    // string "anchor"; the server normalizes it to the contract's null.
     bodyB: {
-      anyOf: [
-        { type: "string", minLength: 1, maxLength: 40 },
-        { type: "null" },
-      ],
+      type: "string",
+      minLength: 1,
+      maxLength: 40,
+      description:
+        'The other body id, or the literal string "anchor" to attach this end to the fixed anchor point.',
     },
     anchor: sandboxVectorJsonSchema(-30, 30, -30, 40),
     stiffness: { type: "number", minimum: 0, maximum: 200 },
