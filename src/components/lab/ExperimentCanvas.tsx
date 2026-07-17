@@ -43,6 +43,7 @@ type ExperimentCanvasProps = {
   launched: boolean;
   capturing: boolean;
   paused: boolean;
+  showOutcomeGuides: boolean;
   onComplete: (evidence: SimulationEvidence) => void;
 };
 
@@ -182,7 +183,15 @@ function ProjectileBody({ scene, launched }: { scene: ProjectileSceneSpec; launc
   );
 }
 
-function ProjectileScene({ scene, launched }: { scene: ProjectileSceneSpec; launched: boolean }) {
+function ProjectileScene({
+  scene,
+  launched,
+  showOutcomeGuides,
+}: {
+  scene: ProjectileSceneSpec;
+  launched: boolean;
+  showOutcomeGuides: boolean;
+}) {
   const angle = (scene.launch.angleDegrees * Math.PI) / 180;
   const vx = scene.launch.speed * Math.cos(angle);
   const vy = scene.launch.speed * Math.sin(angle);
@@ -201,7 +210,7 @@ function ProjectileScene({ scene, launched }: { scene: ProjectileSceneSpec; laun
     <group position={[-8, 0, 0]}>
       <LabFloor span={34} />
       <ProjectileBody scene={scene} launched={launched} />
-      {!launched && <Line points={arc} color="#ff8a3d" transparent opacity={0.28} dashed dashScale={0.8} lineWidth={1.2} />}
+      {showOutcomeGuides && <Line points={arc} color="#ff8a3d" transparent opacity={0.28} dashed dashScale={0.8} lineWidth={1.2} />}
       <group position={[target, 0.12, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <mesh castShadow>
           <torusGeometry args={[0.92, 0.12, 20, 64]} />
@@ -558,6 +567,7 @@ function World({
   launched,
   capturing,
   paused,
+  showOutcomeGuides,
   onComplete,
   onReady,
 }: Omit<ExperimentCanvasProps, "runToken"> & { onReady: () => void }) {
@@ -586,7 +596,13 @@ function World({
       <Suspense fallback={null}>
         <Physics gravity={[0, -spec.scene.gravity, 0]} timeStep={1 / 60} interpolate colliders={false} paused={paused}>
           {spec.scene.family === "drop" && <DropScene scene={spec.scene} launched={launched} />}
-          {spec.scene.family === "projectile" && <ProjectileScene scene={spec.scene} launched={launched} />}
+          {spec.scene.family === "projectile" && (
+            <ProjectileScene
+              scene={spec.scene}
+              launched={launched}
+              showOutcomeGuides={showOutcomeGuides}
+            />
+          )}
           {spec.scene.family === "pendulum" && <PendulumScene scene={spec.scene} launched={launched} />}
           {spec.scene.family === "sandbox" && (
             <SandboxScene
@@ -643,7 +659,15 @@ function World({
   );
 }
 
-export function ExperimentCanvas({ spec, runToken, launched, capturing, paused, onComplete }: ExperimentCanvasProps) {
+export function ExperimentCanvas({
+  spec,
+  runToken,
+  launched,
+  capturing,
+  paused,
+  showOutcomeGuides,
+  onComplete,
+}: ExperimentCanvasProps) {
   const [webglSupported, setWebglSupported] = useState<boolean | null>(null);
   const [sceneReady, setSceneReady] = useState(false);
 
@@ -689,6 +713,7 @@ export function ExperimentCanvas({ spec, runToken, launched, capturing, paused, 
     <>
       <Canvas
         className="experiment-canvas"
+        data-outcome-guides={showOutcomeGuides ? "revealed" : "hidden"}
         dpr={[1, 1.5]}
         camera={camera}
         shadows="percentage"
@@ -706,6 +731,7 @@ export function ExperimentCanvas({ spec, runToken, launched, capturing, paused, 
           launched={launched}
           capturing={capturing}
           paused={paused}
+          showOutcomeGuides={showOutcomeGuides}
           onComplete={onComplete}
           onReady={() => setSceneReady(true)}
         />

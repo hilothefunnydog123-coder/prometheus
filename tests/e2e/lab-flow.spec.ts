@@ -106,16 +106,31 @@ async function finishLearningLoop(page: Page, flow: FamilyFlow) {
   await expect(
     page.getByText("pre-coded, not AI-generated", { exact: false }),
   ).toBeVisible();
+  if (flow.spec.scene.family === "projectile") {
+    await expect(
+      page.locator('[data-outcome-guides="hidden"]'),
+    ).toHaveCount(1);
+  }
 
   const run = page.getByRole("button", { name: "Lock prediction & run" });
   await expect(run).toBeDisabled();
   await page.getByRole("button", { name: flow.initialChoice }).click();
   await expect(run).toBeEnabled();
   await run.click();
+  if (flow.spec.scene.family === "projectile") {
+    await expect(
+      page.locator('[data-outcome-guides="hidden"]'),
+    ).toHaveCount(1);
+  }
 
   await expect(
     page.getByRole("heading", { name: "What the world showed" }),
   ).toBeVisible({ timeout: 15_000 });
+  if (flow.spec.scene.family === "projectile") {
+    await expect(
+      page.locator('[data-outcome-guides="revealed"]'),
+    ).toHaveCount(1);
+  }
   await page
     .getByRole("textbox", {
       name: "What caused the result?",

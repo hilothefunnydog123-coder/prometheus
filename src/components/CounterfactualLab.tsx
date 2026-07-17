@@ -860,6 +860,9 @@ function LabWorkspace({
   const predictionLabel = chosen?.label ?? "an outcome that is still being tested";
   const canEditControls = !launched && phase === "predicting";
   const hasRun = launched || Boolean(evidence);
+  const showOutcomeGuides =
+    Boolean(evidence) &&
+    (phase === "evidence" || phase === "explaining" || phase === "complete");
   const environment =
     spec.scene.family === "drop"
       ? {
@@ -1096,6 +1099,7 @@ function LabWorkspace({
                 launched={launched}
                 capturing={capturing}
                 paused={paused}
+                showOutcomeGuides={showOutcomeGuides}
                 onComplete={onComplete}
               />
             </SimulationErrorBoundary>

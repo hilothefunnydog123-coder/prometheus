@@ -54,4 +54,21 @@ No remaining P0, P1, or P2 issues were found.
 
 Typography, colors, copy, and semantic state styling remain unchanged. Spacing now follows the intended circle → label → connector rhythm. No imagery or icon assets were affected, and the focused source/implementation comparison found no remaining P0, P1, or P2 mismatch related to this correction.
 
+## Focused verification — hidden projectile outcome
+
+- Source problem screenshot: `/var/folders/gt/580h0wx52v1147kb41bv7s4c0000gn/T/TemporaryItems/NSIRD_screencaptureui_lYFyng/Screenshot 2026-07-16 at 8.38.49 PM.png`
+- Corrected implementation screenshot: `/Users/anayagarwalla/prometheus/design-qa-projectile-hidden.jpg`
+- Normalized comparison: `/Users/anayagarwalla/prometheus/design-qa-projectile-comparison.jpg`
+- Source viewport: 1790 × 866; implementation viewport: 1280 × 720
+- State: `The Hidden Second Motion`, run 1, prediction not selected, simulation ready
+
+The source screenshot documents the P1 defect: an orange dashed trajectory crosses the target before the learner has locked a prediction, visually revealing the landing outcome. The normalized full-canvas comparison shows the same production experiment and pre-prediction state after the fix, with the target and launch-angle reference retained but the calculated trajectory absent. A separate focused crop was unnecessary because the trajectory spans the primary canvas and is clearly legible in the normalized comparison.
+
+### Comparison history
+
+1. **P1 — Projectile trajectory revealed the answer before prediction.** Outcome-guide visibility is now gated by both captured evidence and an evidence-bearing phase. The WebGL canvas exposes the same reveal state to browser coverage, preventing a regression that visually gives away the answer. Resolved.
+2. **Post-fix interaction evidence.** Browser verification recorded `hidden` before prediction, `hidden` during simulation playback, and `revealed` only after the `What the world showed` evidence view appeared. The complete projectile prediction/evidence/counterfactual browser test passed. Resolved.
+
+Fonts and typography, spacing and layout rhythm, colors and tokens, image quality, and learner-facing copy remain unchanged from the approved interface. The correction removes only the answer-revealing guide during hypothesis formation and playback; no remaining P0, P1, or P2 issue was found in this state.
+
 final result: passed
