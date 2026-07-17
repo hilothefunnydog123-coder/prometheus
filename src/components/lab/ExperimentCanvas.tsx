@@ -8,6 +8,7 @@ import {
   RoundedBox,
   Sparkles,
   Stars,
+  Trail,
 } from "@react-three/drei";
 import {
   Bloom,
@@ -32,6 +33,7 @@ import {
   useRef,
   useState,
   type ElementRef,
+  type RefObject,
 } from "react";
 import * as THREE from "three";
 import type {
@@ -41,7 +43,11 @@ import type {
   ProjectileScene as ProjectileSceneSpec,
   SandboxScene as SandboxSceneSpec,
 } from "@/lib/contracts/experiment";
-import { buildEvidence, type SimulationEvidence } from "@/lib/physics/evidence";
+import {
+  buildEvidence,
+  type EvidencePoint,
+  type SimulationEvidence,
+} from "@/lib/physics/evidence";
 import { simulateSandbox, type SandboxTrajectory } from "@/lib/physics/sandbox";
 
 export type CameraCommand = {
@@ -204,17 +210,26 @@ function DropScene({ scene, launched }: { scene: DropSceneSpec; launched: boolea
               canSleep
             >
               <BallCollider args={[object.radius]} />
-              <mesh castShadow receiveShadow>
-                <sphereGeometry args={[visualRadius, 64, 48]} />
-                <meshPhysicalMaterial
-                  color={object.color}
-                  emissive={object.color}
-                  emissiveIntensity={0.52}
-                  metalness={0.5}
-                  roughness={0.24}
-                  clearcoat={0.75}
-                />
-              </mesh>
+              {/* Glowing motion ribbon: the bloom pass turns the trail into
+                  a light streak tracing the fall in real time. */}
+              <Trail
+                width={2.4}
+                length={5}
+                color={object.color}
+                attenuation={(width) => width * width}
+              >
+                <mesh castShadow receiveShadow>
+                  <sphereGeometry args={[visualRadius, 64, 48]} />
+                  <meshPhysicalMaterial
+                    color={object.color}
+                    emissive={object.color}
+                    emissiveIntensity={0.52}
+                    metalness={0.5}
+                    roughness={0.24}
+                    clearcoat={0.75}
+                  />
+                </mesh>
+              </Trail>
               <pointLight color={object.color} intensity={2.8} distance={4.5} />
             </RigidBody>
             <Html position={[x, scene.height + visualRadius + 0.62, 0]} center distanceFactor={10}>
@@ -256,16 +271,24 @@ function ProjectileBody({ scene, launched }: { scene: ProjectileSceneSpec; launc
       restitution={0.32}
       canSleep
     >
-      <mesh castShadow>
-        <sphereGeometry args={[scene.object.radius, 40, 28]} />
-        <meshPhysicalMaterial
-          color={scene.object.color}
-          emissive={scene.object.color}
-          emissiveIntensity={0.7}
-          roughness={0.18}
-          metalness={0.32}
-        />
-      </mesh>
+      {/* Comet streak: the projectile drags a bloom-lit ribbon along its arc. */}
+      <Trail
+        width={3.2}
+        length={7}
+        color={scene.object.color}
+        attenuation={(width) => width * width}
+      >
+        <mesh castShadow>
+          <sphereGeometry args={[scene.object.radius, 40, 28]} />
+          <meshPhysicalMaterial
+            color={scene.object.color}
+            emissive={scene.object.color}
+            emissiveIntensity={0.7}
+            roughness={0.18}
+            metalness={0.32}
+          />
+        </mesh>
+      </Trail>
       <pointLight color={scene.object.color} intensity={2.6} distance={4} />
     </RigidBody>
   );
@@ -345,17 +368,25 @@ function DynamicPendulum({ scene }: { scene: PendulumSceneSpec }) {
           <cylinderGeometry args={[0.018, 0.018, scene.length, 10]} />
           <meshStandardMaterial color="#7a9daf" metalness={0.8} roughness={0.25} />
         </mesh>
-        <mesh castShadow>
-          <sphereGeometry args={[scene.bob.radius, 42, 30]} />
-          <meshPhysicalMaterial
-            color={scene.bob.color}
-            emissive={scene.bob.color}
-            emissiveIntensity={0.48}
-            metalness={0.48}
-            roughness={0.2}
-            clearcoat={0.8}
-          />
-        </mesh>
+        {/* Pendulum bob paints its swing arc as a fading light ribbon. */}
+        <Trail
+          width={2.2}
+          length={6}
+          color={scene.bob.color}
+          attenuation={(width) => width * width}
+        >
+          <mesh castShadow>
+            <sphereGeometry args={[scene.bob.radius, 42, 30]} />
+            <meshPhysicalMaterial
+              color={scene.bob.color}
+              emissive={scene.bob.color}
+              emissiveIntensity={0.48}
+              metalness={0.48}
+              roughness={0.2}
+              clearcoat={0.8}
+            />
+          </mesh>
+        </Trail>
         <pointLight color={scene.bob.color} intensity={1.7} distance={4} />
       </RigidBody>
     </>
@@ -611,21 +642,32 @@ function SandboxScene({
             }}
             position={[initial[index]!.x, initial[index]!.y, 0]}
           >
-            <mesh castShadow receiveShadow>
-              <sphereGeometry args={[visualRadius, 48, 36]} />
-              {body.fixed ? (
+            {body.fixed ? (
+              <mesh castShadow receiveShadow>
+                <sphereGeometry args={[visualRadius, 48, 36]} />
                 <meshStandardMaterial color={body.color} metalness={0.85} roughness={0.28} />
-              ) : (
-                <meshPhysicalMaterial
-                  color={body.color}
-                  emissive={body.color}
-                  emissiveIntensity={0.5}
-                  metalness={0.5}
-                  roughness={0.24}
-                  clearcoat={0.7}
-                />
-              )}
-            </mesh>
+              </mesh>
+            ) : (
+              /* Every free body traces its trajectory as a glowing ribbon. */
+              <Trail
+                width={2.6}
+                length={6}
+                color={body.color}
+                attenuation={(width) => width * width}
+              >
+                <mesh castShadow receiveShadow>
+                  <sphereGeometry args={[visualRadius, 48, 36]} />
+                  <meshPhysicalMaterial
+                    color={body.color}
+                    emissive={body.color}
+                    emissiveIntensity={0.5}
+                    metalness={0.5}
+                    roughness={0.24}
+                    clearcoat={0.7}
+                  />
+                </mesh>
+              </Trail>
+            )}
             {!body.fixed && <pointLight color={body.color} intensity={2.1} distance={4.5} />}
             <Html position={[0, visualRadius + 0.55, 0]} center distanceFactor={12}>
               <div className="object-tag">
@@ -680,6 +722,360 @@ function SceneReady({ onReady }: { onReady: () => void }) {
   return null;
 }
 
+/**
+ * Live telemetry: a shared clock written inside the render loop and read by
+ * a DOM overlay. All streaming happens through refs and direct DOM writes so
+ * the 60 Hz feed never triggers a React render.
+ */
+type TelemetryClock = { t: number; running: boolean };
+
+type TelemetryChannelKey =
+  | "primary"
+  | "secondary"
+  | "tertiary"
+  | "primaryVelocity"
+  | "secondaryVelocity";
+
+type TelemetryChannel = {
+  key: TelemetryChannelKey;
+  label: string;
+  unit: string;
+  color: string;
+};
+
+function telemetryChannels(spec: ExperimentSpec): TelemetryChannel[] {
+  const scene = spec.scene;
+  if (scene.family === "drop") {
+    const [a, b] = scene.objects;
+    return [
+      { key: "primary", label: "ALT A", unit: "m", color: a.color },
+      { key: "secondary", label: "ALT B", unit: "m", color: b.color },
+      { key: "primaryVelocity", label: "VEL A", unit: "m/s", color: a.color },
+      { key: "secondaryVelocity", label: "VEL B", unit: "m/s", color: b.color },
+    ];
+  }
+  if (scene.family === "projectile") {
+    return [
+      { key: "primary", label: "X POS", unit: "m", color: scene.object.color },
+      { key: "secondary", label: "ALT", unit: "m", color: "#5de1ff" },
+      { key: "tertiary", label: "SPEED", unit: "m/s", color: "#ff8a3d" },
+    ];
+  }
+  if (scene.family === "pendulum") {
+    return [
+      { key: "primary", label: "θ ANGLE", unit: "deg", color: scene.bob.color },
+      { key: "secondary", label: "ARC VEL", unit: "m/s", color: "#5de1ff" },
+      { key: "tertiary", label: "ΣE MECH", unit: "J", color: "#ff8a3d" },
+    ];
+  }
+  // Sandbox evidence tracks the first two declared bodies.
+  const [first, second] = scene.bodies;
+  if (!first) return [];
+  if (second) {
+    return [
+      { key: "primary", label: `${first.label} Y`.toUpperCase(), unit: "m", color: first.color },
+      { key: "secondary", label: `${second.label} Y`.toUpperCase(), unit: "m", color: second.color },
+      { key: "primaryVelocity", label: "VEL 1", unit: "m/s", color: first.color },
+      { key: "secondaryVelocity", label: "VEL 2", unit: "m/s", color: second.color },
+    ];
+  }
+  return [
+    { key: "primary", label: `${first.label} Y`.toUpperCase(), unit: "m", color: first.color },
+    { key: "secondary", label: "SPEED", unit: "m/s", color: "#5de1ff" },
+  ];
+}
+
+function channelNumber(point: EvidencePoint, key: TelemetryChannelKey) {
+  const value = point[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function channelValueAt(
+  points: EvidencePoint[],
+  key: TelemetryChannelKey,
+  t: number,
+) {
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (!first || !last) return null;
+  if (t <= first.time) return channelNumber(first, key);
+  if (t >= last.time) return channelNumber(last, key);
+  let low = 0;
+  let high = points.length - 1;
+  while (high - low > 1) {
+    const mid = (low + high) >> 1;
+    if (points[mid]!.time <= t) low = mid;
+    else high = mid;
+  }
+  const before = points[low]!;
+  const after = points[high]!;
+  const beforeValue = channelNumber(before, key);
+  const afterValue = channelNumber(after, key);
+  if (beforeValue === null || afterValue === null) {
+    return beforeValue ?? afterValue;
+  }
+  const span = after.time - before.time;
+  if (span <= 0) return afterValue;
+  return beforeValue + ((afterValue - beforeValue) * (t - before.time)) / span;
+}
+
+function formatTelemetryValue(value: number | null) {
+  if (value === null) return "--";
+  const magnitude = Math.abs(value);
+  if (magnitude >= 10_000 || (magnitude > 0 && magnitude < 0.01)) {
+    return value.toExponential(1);
+  }
+  if (magnitude >= 1000) return value.toFixed(0);
+  if (magnitude >= 100) return value.toFixed(1);
+  return value.toFixed(2);
+}
+
+function TelemetryProbe({
+  spec,
+  clock,
+  active,
+}: {
+  spec: ExperimentSpec;
+  clock: RefObject<TelemetryClock>;
+  active: boolean;
+}) {
+  const scaled = spec.scene.family === "sandbox";
+  const rate = useMemo(() => {
+    if (!scaled) return 1;
+    const duration = buildEvidence(spec).duration;
+    return duration > 0 ? duration / Math.min(duration, 8) : 1;
+  }, [scaled, spec]);
+  useEffect(() => {
+    clock.current.t = 0;
+  }, [clock]);
+  useFrame((_, delta) => {
+    clock.current.running = active;
+    if (!active) return;
+    // Sandbox scenes replay a server trajectory time-scaled to <=8 s of wall
+    // clock; mirror that so the HUD reads the same simulation time the scene
+    // is showing. Other families use the SimulationTimer's wall-time clamp.
+    clock.current.t += scaled
+      ? Math.min(delta, 0.05) * rate
+      : Math.min(delta, 0.25);
+  });
+  return null;
+}
+
+const TELEMETRY_CHART_WIDTH = 416;
+const TELEMETRY_CHART_HEIGHT = 104;
+const TELEMETRY_LOG_LIMIT = 22;
+
+function TelemetryHud({
+  spec,
+  launched,
+  paused,
+  clock,
+}: {
+  spec: ExperimentSpec;
+  launched: boolean;
+  paused: boolean;
+  clock: RefObject<TelemetryClock>;
+}) {
+  const evidence = useMemo<SimulationEvidence | null>(() => {
+    try {
+      return buildEvidence(spec);
+    } catch {
+      return null;
+    }
+  }, [spec]);
+  const channels = useMemo(() => telemetryChannels(spec), [spec]);
+  const timeRef = useRef<HTMLElement>(null);
+  const statusRef = useRef<HTMLElement>(null);
+  const valueRefs = useRef<(HTMLElement | null)[]>([]);
+  const chartRef = useRef<HTMLCanvasElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+
+  const chart = useMemo(() => {
+    if (!evidence || evidence.points.length < 2 || evidence.duration <= 0) {
+      return null;
+    }
+    const plotted = channels.slice(0, 2);
+    let min = Infinity;
+    let max = -Infinity;
+    for (const point of evidence.points) {
+      for (const channel of plotted) {
+        const value = channelNumber(point, channel.key);
+        if (value === null) continue;
+        min = Math.min(min, value);
+        max = Math.max(max, value);
+      }
+    }
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+    const pad = Math.max((max - min) * 0.08, 1e-6);
+    min -= pad;
+    max += pad;
+    const toX = (t: number) => (t / evidence.duration) * TELEMETRY_CHART_WIDTH;
+    const toY = (value: number) =>
+      TELEMETRY_CHART_HEIGHT -
+      ((value - min) / (max - min)) * TELEMETRY_CHART_HEIGHT;
+    const paths = plotted.map((channel) => {
+      const path = new Path2D();
+      let started = false;
+      for (const point of evidence.points) {
+        const value = channelNumber(point, channel.key);
+        if (value === null) continue;
+        const x = toX(point.time);
+        const y = toY(value);
+        if (started) path.lineTo(x, y);
+        else {
+          path.moveTo(x, y);
+          started = true;
+        }
+      }
+      return { channel, path, plotted: started };
+    });
+    return { paths, toX, toY };
+  }, [channels, evidence]);
+
+  useEffect(() => {
+    if (!evidence) return;
+    let frame = 0;
+    let lastLoggedT = -1;
+    let logLines: string[] = [];
+    const duration = evidence.duration;
+    const draw = () => {
+      const rawT = clock.current.t;
+      const t = Math.min(rawT, duration);
+      const done = launched && rawT >= duration;
+      if (statusRef.current) {
+        statusRef.current.textContent = !launched
+          ? "STANDBY"
+          : paused
+            ? "PAUSED"
+            : done
+              ? "CAPTURED"
+              : "STREAMING";
+        statusRef.current.dataset.state = !launched
+          ? "standby"
+          : paused
+            ? "paused"
+            : done
+              ? "done"
+              : "live";
+      }
+      if (timeRef.current) {
+        timeRef.current.textContent = t.toFixed(2);
+      }
+      const values = channels.map((channel) =>
+        channelValueAt(evidence.points, channel.key, t),
+      );
+      values.forEach((value, index) => {
+        const node = valueRefs.current[index];
+        if (node) node.textContent = formatTelemetryValue(value);
+      });
+
+      const canvas = chartRef.current;
+      const context = canvas?.getContext("2d");
+      if (canvas && context && chart) {
+        context.clearRect(0, 0, TELEMETRY_CHART_WIDTH, TELEMETRY_CHART_HEIGHT);
+        context.strokeStyle = "rgba(140, 176, 196, 0.14)";
+        context.lineWidth = 1;
+        for (let line = 1; line < 4; line += 1) {
+          const y = (TELEMETRY_CHART_HEIGHT / 4) * line;
+          context.beginPath();
+          context.moveTo(0, y);
+          context.lineTo(TELEMETRY_CHART_WIDTH, y);
+          context.stroke();
+        }
+        for (const { channel, path, plotted } of chart.paths) {
+          if (!plotted) continue;
+          context.strokeStyle = channel.color;
+          context.globalAlpha = 0.92;
+          context.lineWidth = 2.4;
+          context.stroke(path);
+          context.globalAlpha = 1;
+        }
+        if (launched) {
+          const cursorX = chart.toX(t);
+          context.strokeStyle = "rgba(233, 244, 250, 0.4)";
+          context.lineWidth = 1;
+          context.beginPath();
+          context.moveTo(cursorX, 0);
+          context.lineTo(cursorX, TELEMETRY_CHART_HEIGHT);
+          context.stroke();
+          const headChannel = chart.paths[0]?.channel;
+          const headValue = headChannel
+            ? channelValueAt(evidence.points, headChannel.key, t)
+            : null;
+          if (headChannel && headValue !== null) {
+            context.fillStyle = headChannel.color;
+            context.shadowColor = headChannel.color;
+            context.shadowBlur = 12;
+            context.beginPath();
+            context.arc(cursorX, chart.toY(headValue), 4.5, 0, Math.PI * 2);
+            context.fill();
+            context.shadowBlur = 0;
+          }
+        }
+      }
+
+      const shouldLog =
+        launched && !paused && !done && t - lastLoggedT >= 0.12;
+      if (shouldLog && logRef.current) {
+        lastLoggedT = t;
+        const row = values
+          .map((value) => formatTelemetryValue(value).padStart(8))
+          .join("");
+        logLines.unshift(`+${t.toFixed(2).padStart(5)}s${row}`);
+        if (logLines.length > TELEMETRY_LOG_LIMIT) {
+          logLines = logLines.slice(0, TELEMETRY_LOG_LIMIT);
+        }
+        logRef.current.textContent = logLines.join("\n");
+      }
+      frame = requestAnimationFrame(draw);
+    };
+    frame = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(frame);
+  }, [channels, chart, clock, evidence, launched, paused]);
+
+  if (!evidence || channels.length === 0) return null;
+  return (
+    <div className="telemetry-hud" aria-hidden="true">
+      <header className="telemetry-head">
+        <i className="telemetry-pulse" />
+        <span>LIVE TELEMETRY</span>
+        <b ref={statusRef} data-state="standby">
+          STANDBY
+        </b>
+      </header>
+      <div className="telemetry-grid">
+        <span className="telemetry-cell telemetry-time">
+          <small>T+</small>
+          <b ref={timeRef}>0.00</b>
+          <em>s</em>
+        </span>
+        {channels.map((channel, index) => (
+          <span key={channel.key} className="telemetry-cell">
+            <small style={{ color: channel.color }}>{channel.label}</small>
+            <b
+              ref={(node) => {
+                valueRefs.current[index] = node;
+              }}
+            >
+              --
+            </b>
+            <em>{channel.unit}</em>
+          </span>
+        ))}
+      </div>
+      <canvas
+        ref={chartRef}
+        className="telemetry-chart"
+        width={TELEMETRY_CHART_WIDTH}
+        height={TELEMETRY_CHART_HEIGHT}
+      />
+      <div ref={logRef} className="telemetry-log">
+        awaiting run data…
+      </div>
+    </div>
+  );
+}
+
 function World({
   spec,
   runToken,
@@ -690,7 +1086,11 @@ function World({
   cameraCommand,
   onComplete,
   onReady,
-}: ExperimentCanvasProps & { onReady: () => void }) {
+  telemetry,
+}: ExperimentCanvasProps & {
+  onReady: () => void;
+  telemetry: RefObject<TelemetryClock>;
+}) {
   const framing = useMemo(() => experimentFraming(spec), [spec]);
   return (
     <>
@@ -701,11 +1101,21 @@ function World({
       <Stars
         radius={120}
         depth={60}
-        count={1400}
+        count={2200}
         factor={4}
         saturation={0}
         fade
         speed={0.6}
+      />
+      {/* Ambient dust motes drifting through the whole lab volume. */}
+      <Sparkles
+        count={90}
+        scale={[26, 14, 18]}
+        position={[0, 6, 0]}
+        size={1.6}
+        speed={0.12}
+        color="#8ea4ff"
+        opacity={0.35}
       />
       <hemisphereLight args={["#9fd0ff", "#0a1220", 0.55]} />
       <ambientLight intensity={0.55} color="#7ea8c0" />
@@ -738,6 +1148,7 @@ function World({
           {spec.scene.family !== "sandbox" && (
             <SimulationTimer active={capturing && !paused} spec={spec} onComplete={onComplete} />
           )}
+          <TelemetryProbe spec={spec} clock={telemetry} active={capturing && !paused} />
           <SceneReady onReady={onReady} />
         </Physics>
       </Suspense>
@@ -780,6 +1191,7 @@ export function ExperimentCanvas({
 }: ExperimentCanvasProps) {
   const [webglSupported, setWebglSupported] = useState<boolean | null>(null);
   const [sceneReady, setSceneReady] = useState(false);
+  const telemetryClock = useRef<TelemetryClock>({ t: 0, running: false });
 
   useEffect(() => {
     const canvas = document.createElement("canvas");
@@ -840,8 +1252,16 @@ export function ExperimentCanvas({
           cameraCommand={cameraCommand}
           onComplete={onComplete}
           onReady={() => setSceneReady(true)}
+          telemetry={telemetryClock}
         />
       </Canvas>
+      <TelemetryHud
+        key={`${spec.id}-${runToken}`}
+        spec={spec}
+        launched={launched}
+        paused={paused}
+        clock={telemetryClock}
+      />
       {!sceneReady && (
         <div className="canvas-loading" role="status">
           <Atom className="loading-atom" size={34} aria-hidden="true" />

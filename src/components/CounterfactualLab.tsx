@@ -432,6 +432,21 @@ function CountUp({
   return <span ref={ref}>{String(value).padStart(pad, "0")}</span>;
 }
 
+const tickerEntries = [
+  ["GRAVITY", "g = 9.81 m/s²"],
+  ["PENDULUM", "T = 2π√(L/g)"],
+  ["DRAG", "F_d = ½ρC_dAv²"],
+  ["ENERGY", "E = ½mv² + mgh"],
+  ["NEWTON II", "a = F/m"],
+  ["KINEMATICS", "x = x₀ + v₀t + ½at²"],
+  ["ORBITS", "F = Gm₁m₂/r²"],
+  ["SPRINGS", "F = −kx"],
+  ["MOMENTUM", "p = mv"],
+  ["IMPULSE", "J = FΔt = Δp"],
+  ["CIRCULAR", "a_c = v²/r"],
+  ["WORK", "W = Fd cosθ"],
+] as const;
+
 const mechanismSteps = [
   {
     icon: LockKeyhole,
@@ -520,10 +535,12 @@ function Landing({
     <main id="main-content" className="landing" tabIndex={-1}>
       <Reveal className="hero-shell">
       <div className="hero-panel">
+      <div className="hero-aurora" aria-hidden="true" />
       <div className="hero-grid" aria-hidden="true" />
       <div className="hero-orbit hero-orbit-a" />
       <div className="hero-orbit hero-orbit-b" />
       <div className="hero-spark" aria-hidden="true"><i /><i /><i /><i /><i /></div>
+      <div className="hero-scan" aria-hidden="true" />
       <div className="hero-section">
         <div className="hero-copy">
           <div className="hero-chip">
@@ -631,6 +648,17 @@ function Landing({
           <p className="privacy-note"><span /> Images are analyzed in memory and never saved.</p>
         </div>
       </div>
+      </div>
+      <div className="physics-ticker" aria-hidden="true">
+        <div className="physics-ticker-track">
+          {[0, 1].map((pass) =>
+            tickerEntries.map(([name, formula]) => (
+              <span key={`${pass}-${name}`}>
+                <b>{name}</b> {formula}
+              </span>
+            )),
+          )}
+        </div>
       </div>
       </Reveal>
 
