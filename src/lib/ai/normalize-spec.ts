@@ -22,8 +22,9 @@ import { getSceneValue, isAllowlistedPath, pathBounds } from "./scene-paths";
  */
 
 export function normalizeGeneratedSpec(input: unknown): unknown {
-  const parsed = experimentSpecSchema.safeParse(input);
-  if (!parsed.success) return input; // schema errors go to repair as before
+  const candidate = coerceSandboxSpringAnchors(input);
+  const parsed = experimentSpecSchema.safeParse(candidate);
+  if (!parsed.success) return candidate; // schema errors go to repair as before
   const spec = parsed.data;
 
   // A base testChange only means something for comparison-style predictions:
@@ -50,6 +51,45 @@ export function normalizeGeneratedSpec(input: unknown): unknown {
   );
 
   return spec;
+}
+
+/**
+ * Gemini structured output cannot express a nullable field (no null type in
+ * its schema dialect), so the tool schema has the model write the literal
+ * string "anchor" when a spring end attaches to its fixed anchor point. Map
+ * that sentinel back to the contract's null on the raw candidate, before any
+ * schema parsing. Every other value passes through untouched.
+ */
+function coerceSandboxSpringAnchors(input: unknown): unknown {
+  if (input === null || typeof input !== "object") return input;
+  const scene = (input as { scene?: unknown }).scene;
+  if (scene === null || typeof scene !== "object") return input;
+  if ((scene as { family?: unknown }).family !== "sandbox") return input;
+  const springs = (scene as { springs?: unknown }).springs;
+  if (!Array.isArray(springs)) return input;
+  const needsCoercion = springs.some(
+    (spring) =>
+      spring !== null &&
+      typeof spring === "object" &&
+      typeof (spring as { bodyB?: unknown }).bodyB === "string" &&
+      ((spring as { bodyB: string }).bodyB.trim().toLowerCase() === "anchor" ||
+        (spring as { bodyB: string }).bodyB.trim() === ""),
+  );
+  if (!needsCoercion) return input;
+
+  const clone = structuredClone(input) as {
+    scene: { springs: Array<{ bodyB?: unknown }> };
+  };
+  for (const spring of clone.scene.springs) {
+    if (
+      typeof spring.bodyB === "string" &&
+      (spring.bodyB.trim().toLowerCase() === "anchor" ||
+        spring.bodyB.trim() === "")
+    ) {
+      spring.bodyB = null;
+    }
+  }
+  return clone;
 }
 
 /**
