@@ -169,14 +169,17 @@ export async function chatCompletion(
   const deadline = Date.now() + timeoutBudgetMs;
 
   // HTTP 400 degradation chain. Providers reject optional request features
-  // with a blanket 400: non-thinking Gemini models reject reasoning_effort,
-  // and Gemini structured output rejects schema constructs outside its
-  // supported dialect. Each 400 removes one optional feature and retries —
-  // ending, in the worst case, at a bare messages-only request (the shape the
-  // health probe exercises) with the schema described in an instruction
-  // message instead. Server-side Zod validation is authoritative in every
-  // mode, so degraded requests can never weaken the contract.
-  let activeConfig = config;
+  // with a blanket 400: Gemini structured output rejects schema constructs
+  // outside its supported dialect, and non-thinking models reject
+  // reasoning_effort. Each 400 removes one optional feature and retries —
+  // dropping the schema FIRST (the reasoning cap keeps generations fast and
+  // is accepted whenever the schema-free health probe passes), ending in the
+  // worst case at a bare messages-only request with the schema described in
+  // an instruction message. Server-side Zod validation is authoritative in
+  // every mode, so degraded requests can never weaken the contract. The
+  // working degradation level is memoized per provider+model so later calls
+  // skip the doomed attempts instead of re-spending their time budget.
+  let activeConfig = applyLearnedMode(config, request);
   let degradationsRemaining = 2;
   let transientRetriesUsed = 0;
 
@@ -186,11 +189,13 @@ export async function chatCompletion(
       throw new ProviderTimeoutError(timeoutBudgetMs);
     }
     try {
-      return await chatCompletionOnce(
+      const result = await chatCompletionOnce(
         activeConfig,
         { ...request, timeoutMs: remainingMs },
         fetchImpl,
       );
+      rememberWorkingMode(config, activeConfig, request);
+      return result;
     } catch (error) {
       if (request.signal?.aborted) {
         throw new ProviderCancelledError();
@@ -200,16 +205,16 @@ export async function chatCompletion(
         error.status === 400 &&
         degradationsRemaining > 0
       ) {
-        if (activeConfig.reasoningEffort) {
-          activeConfig = { ...activeConfig, reasoningEffort: undefined };
-          degradationsRemaining -= 1;
-          continue;
-        }
         if (
           activeConfig.structuredOutputMode === "json-schema" &&
           request.tool
         ) {
           activeConfig = { ...activeConfig, structuredOutputMode: "plain-json" };
+          degradationsRemaining -= 1;
+          continue;
+        }
+        if (activeConfig.reasoningEffort) {
+          activeConfig = { ...activeConfig, reasoningEffort: undefined };
           degradationsRemaining -= 1;
           continue;
         }
@@ -230,6 +235,68 @@ export async function chatCompletion(
         request.signal,
       );
     }
+  }
+}
+
+/**
+ * Per-instance memo of the degradation level a provider+model actually
+ * accepted for schema-carrying requests, so subsequent calls start at the
+ * working level instead of replaying known-doomed attempts. Never persisted;
+ * a config change (different base URL or model) uses a different key.
+ */
+type LearnedMode = {
+  plainJson: boolean;
+  dropReasoning: boolean;
+};
+
+const learnedModes = new Map<string, LearnedMode>();
+
+/** Test-only: forget learned provider modes between cases. */
+export function resetLearnedProviderModes(): void {
+  learnedModes.clear();
+}
+
+function learnedModeKey(config: FeatherlessConfig, request: ChatRequest): string {
+  return `${config.baseUrl}|${request.model}`;
+}
+
+function applyLearnedMode(
+  config: FeatherlessConfig,
+  request: ChatRequest,
+): FeatherlessConfig {
+  // The memo only concerns schema-carrying requests; bare requests (e.g. the
+  // health probe) always use the configured mode.
+  if (!request.tool) return config;
+  const learned = learnedModes.get(learnedModeKey(config, request));
+  if (!learned) return config;
+  let applied = config;
+  if (learned.plainJson && applied.structuredOutputMode === "json-schema") {
+    applied = { ...applied, structuredOutputMode: "plain-json" };
+  }
+  if (learned.dropReasoning && applied.reasoningEffort) {
+    applied = { ...applied, reasoningEffort: undefined };
+  }
+  return applied;
+}
+
+function rememberWorkingMode(
+  config: FeatherlessConfig,
+  workingConfig: FeatherlessConfig,
+  request: ChatRequest,
+): void {
+  if (!request.tool) return;
+  const plainJson =
+    config.structuredOutputMode === "json-schema" &&
+    workingConfig.structuredOutputMode === "plain-json";
+  const dropReasoning =
+    config.reasoningEffort !== undefined &&
+    workingConfig.reasoningEffort === undefined;
+  const key = learnedModeKey(config, request);
+  if (plainJson || dropReasoning) {
+    learnedModes.set(key, { plainJson, dropReasoning });
+  } else {
+    // The configured mode worked as-is; clear any stale memo.
+    learnedModes.delete(key);
   }
 }
 
