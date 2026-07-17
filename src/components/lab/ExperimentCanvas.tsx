@@ -1,6 +1,6 @@
 "use client";
 
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   Html,
   Line,
@@ -25,7 +25,14 @@ import {
   useSphericalJoint,
 } from "@react-three/rapier";
 import { Atom } from "lucide-react";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ElementRef,
+} from "react";
 import * as THREE from "three";
 import type {
   DropScene as DropSceneSpec,
@@ -37,6 +44,11 @@ import type {
 import { buildEvidence, type SimulationEvidence } from "@/lib/physics/evidence";
 import { simulateSandbox, type SandboxTrajectory } from "@/lib/physics/sandbox";
 
+export type CameraCommand = {
+  type: "zoom-in" | "zoom-out" | "reset";
+  token: number;
+};
+
 type ExperimentCanvasProps = {
   spec: ExperimentSpec;
   runToken: number;
@@ -44,8 +56,84 @@ type ExperimentCanvasProps = {
   capturing: boolean;
   paused: boolean;
   showOutcomeGuides: boolean;
+  cameraCommand: CameraCommand;
   onComplete: (evidence: SimulationEvidence) => void;
 };
+
+type VectorTuple = readonly [number, number, number];
+
+function InteractiveCameraControls({
+  position,
+  target,
+  command,
+}: {
+  position: VectorTuple;
+  target: VectorTuple;
+  command: CameraCommand;
+}) {
+  const controls = useRef<ElementRef<typeof OrbitControls>>(null);
+  const appliedCommandToken = useRef<number | null>(null);
+  const appliedFraming = useRef("");
+  const { camera } = useThree();
+
+  useEffect(() => {
+    const orbit = controls.current;
+    if (!orbit) return;
+    const framingKey = `${position.join(",")}|${target.join(",")}`;
+    const framingChanged = appliedFraming.current !== framingKey;
+    const commandChanged = appliedCommandToken.current !== command.token;
+    if (!framingChanged && !commandChanged) return;
+
+    if (framingChanged || command.type === "reset") {
+      camera.position.set(position[0], position[1], position[2]);
+      orbit.target.set(target[0], target[1], target[2]);
+    } else {
+      const offset = camera.position.clone().sub(orbit.target);
+      const currentDistance = offset.length();
+      const multiplier = command.type === "zoom-in" ? 0.78 : 1.28;
+      const nextDistance = THREE.MathUtils.clamp(
+        currentDistance * multiplier,
+        2.5,
+        48,
+      );
+      if (currentDistance > 0.001) {
+        offset.setLength(nextDistance);
+        camera.position.copy(orbit.target).add(offset);
+      }
+    }
+
+    camera.updateProjectionMatrix();
+    orbit.update();
+    appliedFraming.current = framingKey;
+    appliedCommandToken.current = command.token;
+  }, [
+    camera,
+    command.token,
+    command.type,
+    position,
+    target,
+  ]);
+
+  return (
+    <OrbitControls
+      ref={controls}
+      makeDefault
+      enableDamping
+      dampingFactor={0.08}
+      enablePan
+      screenSpacePanning
+      zoomToCursor
+      zoomSpeed={0.9}
+      panSpeed={0.8}
+      rotateSpeed={0.65}
+      minDistance={2.5}
+      maxDistance={48}
+      minPolarAngle={Math.PI * 0.12}
+      maxPolarAngle={Math.PI * 0.49}
+      target={target}
+    />
+  );
+}
 
 function LabFloor({ span = 28 }: { span?: number }) {
   return (
@@ -344,6 +432,36 @@ function sandboxFraming(scene: SandboxSceneSpec) {
   };
 }
 
+function experimentFraming(spec: ExperimentSpec) {
+  if (spec.scene.family === "sandbox") {
+    const framing = sandboxFraming(spec.scene);
+    return {
+      position: framing.camera.position as VectorTuple,
+      target: framing.target as VectorTuple,
+      fov: framing.camera.fov,
+    };
+  }
+  if (spec.scene.family === "projectile") {
+    return {
+      position: [5, 8, 18] as VectorTuple,
+      target: [3, 2.5, 0] as VectorTuple,
+      fov: 46,
+    };
+  }
+  if (spec.scene.family === "drop") {
+    return {
+      position: [6.3, 6.4, 11.4] as VectorTuple,
+      target: [0, 4.25, 0] as VectorTuple,
+      fov: 37,
+    };
+  }
+  return {
+    position: [8, 7, 13] as VectorTuple,
+    target: [0, 3, 0] as VectorTuple,
+    fov: 44,
+  };
+}
+
 function sampleTrajectory(trajectory: SandboxTrajectory, time: number) {
   const frames = trajectory.frames;
   const clamped = Math.max(0, Math.min(time, trajectory.duration));
@@ -564,13 +682,16 @@ function SceneReady({ onReady }: { onReady: () => void }) {
 
 function World({
   spec,
+  runToken,
   launched,
   capturing,
   paused,
   showOutcomeGuides,
+  cameraCommand,
   onComplete,
   onReady,
-}: Omit<ExperimentCanvasProps, "runToken"> & { onReady: () => void }) {
+}: ExperimentCanvasProps & { onReady: () => void }) {
+  const framing = useMemo(() => experimentFraming(spec), [spec]);
   return (
     <>
       <color attach="background" args={["#04060d"]} />
@@ -594,7 +715,7 @@ function World({
       <spotLight position={[8, 9, -4]} intensity={95} angle={0.38} penumbra={0.9} color="#42d9ff" />
       <pointLight position={[0, 2, 9]} intensity={26} distance={26} color="#8ea4ff" />
       <Suspense fallback={null}>
-        <Physics gravity={[0, -spec.scene.gravity, 0]} timeStep={1 / 60} interpolate colliders={false} paused={paused}>
+        <Physics key={`${spec.id}-${runToken}-${launched ? "live" : "ready"}`} gravity={[0, -spec.scene.gravity, 0]} timeStep={1 / 60} interpolate colliders={false} paused={paused}>
           {spec.scene.family === "drop" && <DropScene scene={spec.scene} launched={launched} />}
           {spec.scene.family === "projectile" && (
             <ProjectileScene
@@ -620,22 +741,10 @@ function World({
           <SceneReady onReady={onReady} />
         </Physics>
       </Suspense>
-      <OrbitControls
-        makeDefault
-        enablePan={false}
-        minDistance={7}
-        maxDistance={28}
-        minPolarAngle={Math.PI * 0.18}
-        maxPolarAngle={Math.PI * 0.48}
-        target={
-          spec.scene.family === "sandbox"
-            ? sandboxFraming(spec.scene).target
-            : spec.scene.family === "projectile"
-              ? [3, 2.5, 0]
-              : spec.scene.family === "drop"
-                ? [0, 4.25, 0]
-                : [0, 3, 0]
-        }
+      <InteractiveCameraControls
+        position={framing.position}
+        target={framing.target}
+        command={cameraCommand}
       />
       {/* Cinematic grade: soft bloom on every emissive, a whisper of lens
           fringing, and a vignette to seat the scene in the panel. */}
@@ -666,6 +775,7 @@ export function ExperimentCanvas({
   capturing,
   paused,
   showOutcomeGuides,
+  cameraCommand,
   onComplete,
 }: ExperimentCanvasProps) {
   const [webglSupported, setWebglSupported] = useState<boolean | null>(null);
@@ -701,19 +811,14 @@ export function ExperimentCanvas({
     );
   }
 
-  const camera =
-    spec.scene.family === "sandbox"
-      ? sandboxFraming(spec.scene).camera
-      : spec.scene.family === "projectile"
-        ? ({ position: [5, 8, 18], fov: 46 } as const)
-        : spec.scene.family === "drop"
-          ? ({ position: [6.3, 6.4, 11.4], fov: 37 } as const)
-          : ({ position: [8, 7, 13], fov: 44 } as const);
+  const framing = experimentFraming(spec);
+  const camera = { position: framing.position, fov: framing.fov };
   return (
     <>
       <Canvas
         className="experiment-canvas"
         data-outcome-guides={showOutcomeGuides ? "revealed" : "hidden"}
+        data-camera-command={`${cameraCommand.type}-${cameraCommand.token}`}
         dpr={[1, 1.5]}
         camera={camera}
         shadows="percentage"
@@ -726,12 +831,13 @@ export function ExperimentCanvas({
         aria-label={`Interactive 3D simulation: ${spec.title}`}
       >
         <World
-          key={`${spec.id}-${runToken}-${launched ? "live" : "ready"}`}
           spec={spec}
+          runToken={runToken}
           launched={launched}
           capturing={capturing}
           paused={paused}
           showOutcomeGuides={showOutcomeGuides}
+          cameraCommand={cameraCommand}
           onComplete={onComplete}
           onReady={() => setSceneReady(true)}
         />

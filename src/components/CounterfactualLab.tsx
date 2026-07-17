@@ -9,6 +9,7 @@ import {
   Check,
   ChevronRight,
   CircleGauge,
+  Crosshair,
   Expand,
   FlaskConical,
   ImagePlus,
@@ -30,6 +31,8 @@ import {
   Wind,
   X,
   Zap,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type {
@@ -47,6 +50,7 @@ import {
 } from "@/components/lab/demo-experiments";
 import { EvidenceChart } from "@/components/lab/EvidenceChart";
 import { SimulationErrorBoundary } from "@/components/lab/SimulationErrorBoundary";
+import type { CameraCommand } from "@/components/lab/ExperimentCanvas";
 import {
   applyCounterfactual,
   isVelocityFocusedDrop,
@@ -84,6 +88,7 @@ type Phase =
   | "complete";
 
 const sleep = (duration: number) => new Promise((resolve) => setTimeout(resolve, duration));
+const MAX_QUESTION_LENGTH = 500;
 
 const compileStages = [
   { label: "Reading the question", detail: "Extracting variables and learning intent" },
@@ -109,18 +114,73 @@ function canonicalQuestionFor(spec: ExperimentSpec) {
   );
 }
 
+function compactCompilerNotice(notice: string) {
+  const normalized = notice.toLowerCase();
+  if (normalized.includes("pre-coded")) {
+    return "Pre-coded preset · not generated for this question";
+  }
+  if (normalized.includes("ai-generated")) {
+    return "AI-generated model · physics validated";
+  }
+  return "Validated simulation model · provenance checked";
+}
+
+function sceneLegend(spec: ExperimentSpec) {
+  return spec.measurements.slice(0, 3).map((measurement) => ({
+    id: measurement.id,
+    color: measurement.color,
+    label: `${measurement.label}${measurement.unit ? ` · ${measurement.unit}` : ""}`,
+  }));
+}
+
 function phaseIndex(phase: Phase) {
   if (phase === "input" || phase === "compiling") return 0;
   if (phase === "predicting") return 1;
   if (phase === "running") return 2;
   if (phase === "evidence") return 3;
+  if (phase === "explaining") return 4;
   if (
-    phase === "explaining" ||
     phase === "counterfactual-predicting" ||
     phase === "counterfactual-running"
-  ) return 4;
+  ) return 5;
   if (phase === "complete") return 5;
   return 0;
+}
+
+type ExperimentChange = {
+  targetPath: string;
+  label: string;
+  before: number | null;
+  after: number;
+  unit: string;
+};
+
+function variableMetadata(
+  spec: ExperimentSpec,
+  targetPath: string,
+): { label: string; value: number | null; unit: string } {
+  const control = spec.controls.find((item) => item.targetPath === targetPath);
+  if (control) {
+    return { label: control.label, value: control.value, unit: control.unit };
+  }
+  return {
+    label:
+      targetPath
+        .split(".")
+        .at(-1)
+        ?.replace(/([a-z])([A-Z])/g, "$1 $2") ?? "Test variable",
+    value: null,
+    unit: "",
+  };
+}
+
+function describeExperimentChange(
+  spec: ExperimentSpec,
+  targetPath: string,
+  after: number,
+): ExperimentChange {
+  const metadata = variableMetadata(spec, targetPath);
+  return { targetPath, ...metadata, before: metadata.value, after };
 }
 
 async function prepareImage(file: File) {
@@ -176,6 +236,90 @@ function Header({ inLab, phase, onExit }: { inLab: boolean; phase: Phase; onExit
         </button>
       )}
     </header>
+  );
+}
+
+function ExitConfirmation({
+  open,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dialog = useRef<HTMLDivElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.requestAnimationFrame(() => cancelButton.current?.focus());
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        dialog.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+      window.requestAnimationFrame(() => previousFocus?.focus());
+    };
+  }, [onCancel, open]);
+
+  if (!open) return null;
+  return (
+    <div
+      className="exit-dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <div
+        ref={dialog}
+        className="exit-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="exit-dialog-title"
+        aria-describedby="exit-dialog-description"
+      >
+        <div className="exit-dialog-icon"><FlaskConical size={22} aria-hidden="true" /></div>
+        <p className="panel-kicker">EXPERIMENT IN PROGRESS</p>
+        <h2 id="exit-dialog-title">Leave this experiment?</h2>
+        <p id="exit-dialog-description">
+          Your current prediction, evidence, and transfer progress will be cleared.
+        </p>
+        <div>
+          <button ref={cancelButton} type="button" className="dialog-cancel" onClick={onCancel}>
+            Keep experimenting
+          </button>
+          <button type="button" className="dialog-confirm" onClick={onConfirm}>
+            Leave experiment
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -341,6 +485,11 @@ function Landing({
   compile: (promptOverride?: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const starterQuestions = [
+    "How does air resistance change a falling object's motion?",
+    "What makes a pendulum's period longer?",
+    "How does launch angle change a projectile's range?",
+  ];
 
   const clearImage = () => {
     if (imagePreview) URL.revokeObjectURL(imagePreview);
@@ -368,7 +517,7 @@ function Landing({
   };
 
   return (
-    <main className="landing">
+    <main id="main-content" className="landing" tabIndex={-1}>
       <Reveal className="hero-shell">
       <div className="hero-panel">
       <div className="hero-grid" aria-hidden="true" />
@@ -408,12 +557,39 @@ function Landing({
           </p>
           <textarea
             id="experiment-question"
-            aria-describedby="experiment-scope"
+            aria-describedby="experiment-scope experiment-question-limit"
             value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
+            onChange={(event) =>
+              setPrompt(event.target.value.slice(0, MAX_QUESTION_LENGTH))
+            }
             placeholder="Why don’t heavier objects fall faster?"
             rows={3}
+            maxLength={MAX_QUESTION_LENGTH}
           />
+          <div className="starter-questions" aria-label="Starter mechanics questions">
+            <span>TRY A QUESTION</span>
+            <div>
+              {starterQuestions.map((question) => (
+                <button
+                  type="button"
+                  key={question}
+                  onClick={() => {
+                    setPrompt(question);
+                    setError(null);
+                    document.getElementById("experiment-question")?.focus();
+                  }}
+                >
+                  {question}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p id="experiment-question-limit" className="question-limit">
+            <span>Questions can be up to {MAX_QUESTION_LENGTH} characters.</span>
+            <output aria-label={`${prompt.length} of ${MAX_QUESTION_LENGTH} characters used`}>
+              {prompt.length}/{MAX_QUESTION_LENGTH}
+            </output>
+          </p>
           {imagePreview && (
             <div className="image-preview">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -543,19 +719,28 @@ function Landing({
 
 function ProgressRail({ phase }: { phase: Phase }) {
   const active = phaseIndex(phase);
-  const steps = ["Ask", "Predict", "Test", "Evidence", "Change", "Explain"];
+  const steps = ["Ask", "Predict", "Test", "Evidence", "Explain", "Transfer"];
+  const journeyComplete = phase === "complete";
   return (
-    <div className="progress-rail">
-      {steps.map((step, index) => (
-        <div
-          key={step}
-          aria-current={index === active ? "step" : undefined}
-          className={`${index === active ? "current" : ""} ${index < active ? "done" : ""}`}
-        >
-          <span>{index < active ? <Check size={11} /> : index + 1}</span>
-          <small>{step}</small>
-        </div>
-      ))}
+    <div className="progress-rail" role="list">
+      {steps.map((step, index) => {
+        const done = index < active || (journeyComplete && index === active);
+        const current = index === active && !journeyComplete;
+        return (
+          <div
+            key={step}
+            role="listitem"
+            aria-label={`Step ${index + 1} of ${steps.length}: ${step}, ${
+              current ? "current" : done ? "complete" : "upcoming"
+            }`}
+            aria-current={current ? "step" : undefined}
+            className={`${current ? "current" : ""} ${done ? "done" : ""}`}
+          >
+            <span>{done ? <Check size={11} /> : index + 1}</span>
+            <small>{step}</small>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -567,6 +752,8 @@ function PredictionPanel({
   onRun,
   counterfactual,
   running,
+  confidence,
+  setConfidence,
 }: {
   spec: ExperimentSpec;
   selected: string | null;
@@ -574,25 +761,35 @@ function PredictionPanel({
   onRun: () => void;
   counterfactual: boolean;
   running: boolean;
+  confidence: number;
+  setConfidence: (value: number) => void;
 }) {
-  const [confidence, setConfidence] = useState(62);
   const testChange = spec.prediction.testChange;
-  const changedVariable = testChange?.targetPath
-    .split(".")
-    .at(-1)
-    ?.replace(/([a-z])([A-Z])/g, "$1 $2");
+  const change = testChange
+    ? describeExperimentChange(spec, testChange.targetPath, testChange.value)
+    : null;
 
   return (
     <div className="panel-content prediction-panel">
       <p className="panel-kicker">{counterfactual ? "CHANGE ONE VARIABLE" : "COMMIT BEFORE YOU SEE"}</p>
       <h2>{spec.prediction.prompt}</h2>
       <p className="panel-support">Choose an outcome before the world moves. You can revise your model after you see the evidence.</p>
-      {testChange && changedVariable && (
-        <div className="test-change" aria-label={`Only ${changedVariable} changes to ${testChange.value}`}>
+      <div className="run-settings" aria-label="Current run settings">
+        <small>CURRENT RUN SETTINGS</small>
+        <div>
+          {spec.controls.slice(0, 4).map((control) => (
+            <span key={control.id}>
+              {control.label}: <b>{control.value.toFixed(precisionForStep(control.step))}{control.unit ? ` ${control.unit}` : ""}</b>
+            </span>
+          ))}
+        </div>
+      </div>
+      {testChange && change && (
+        <div className="test-change" aria-label={`Only ${change.label} changes to ${testChange.value}${change.unit ? ` ${change.unit}` : ""}`}>
           <small>ONE VARIABLE CHANGES</small>
-          <strong>{changedVariable}</strong>
+          <strong>{change.label}</strong>
           <ArrowRight size={13} />
-          <span>{testChange.value}</span>
+          <span>{testChange.value}{change.unit ? ` ${change.unit}` : ""}</span>
         </div>
       )}
       <div className="choice-list">
@@ -623,6 +820,9 @@ function PredictionPanel({
           step="1"
           value={confidence}
           disabled={running}
+          style={{
+            background: `linear-gradient(90deg, var(--orange) 0 ${confidence}%, #25343c ${confidence}%) center / 100% 3px no-repeat`,
+          }}
           onChange={(event) => setConfidence(Number(event.target.value))}
         />
         <div className="confidence-labels" aria-hidden="true">
@@ -658,6 +858,8 @@ function EvidencePanel({
   spec,
   evidence,
   predictionLabel,
+  predictionConfidence,
+  predictionCorrect,
   explanation,
   setExplanation,
   onEvaluate,
@@ -668,6 +870,8 @@ function EvidencePanel({
   spec: ExperimentSpec;
   evidence: SimulationEvidence;
   predictionLabel: string;
+  predictionConfidence: number;
+  predictionCorrect: boolean;
   explanation: string;
   setExplanation: (value: string) => void;
   onEvaluate: () => void;
@@ -680,6 +884,10 @@ function EvidencePanel({
       <section className="notebook-recap">
         <div><span>YOUR PREDICTION</span><Pencil size={13} aria-hidden="true" /></div>
         <p>I predicted <strong>{predictionLabel.toLowerCase()}</strong>.</p>
+        <p className={`calibration-note ${predictionCorrect ? "supported" : "reconsider"}`}>
+          <CircleGauge size={14} aria-hidden="true" />
+          You were {predictionConfidence}% confident. The measured outcome {predictionCorrect ? "supported" : "contradicted"} that prediction.
+        </p>
       </section>
       <div className="evidence-status"><span><Check size={13} /></span> RUN 1 · EXPERIMENT COMPLETE</div>
       <h2>What the world showed</h2>
@@ -688,14 +896,25 @@ function EvidencePanel({
         <div><small>{evidence.metricA.label}</small><strong>{evidence.metricA.value}</strong></div>
         <div><small>{evidence.metricB.label}</small><strong>{evidence.metricB.value}</strong></div>
       </div>
+      <button
+        type="button"
+        className="evidence-jump"
+        onClick={() =>
+          document
+            .getElementById("student-explanation")
+            ?.scrollIntoView({ behavior: "smooth", block: "center" })
+        }
+      >
+        Explain this result <ArrowRight size={14} />
+      </button>
       <div className="chart-heading"><span>{chartTitle(spec)}</span><small>Recorded evidence</small></div>
       <EvidenceChart spec={spec} evidence={evidence} />
       <div className="insight-strip">
         <Lightbulb size={19} aria-hidden="true" />
         <div><strong>Evidence, not the answer</strong><p>{spec.misconception.description}</p></div>
       </div>
-      <label htmlFor="explanation">What caused the result?</label>
-      <textarea id="explanation" value={explanation} onChange={(event) => setExplanation(event.target.value)} placeholder={spec.prediction.reasoningPrompt} rows={3} />
+      <label htmlFor="student-explanation">What caused the result?</label>
+      <textarea id="student-explanation" value={explanation} onChange={(event) => setExplanation(event.target.value)} placeholder={spec.prediction.reasoningPrompt} rows={3} />
       {evaluationError && (
         <div className="offline-feedback-offer">
           <p className="panel-error" role="alert">{evaluationError}</p>
@@ -759,22 +978,120 @@ function FeedbackPanel({
   );
 }
 
-function CompletePanel({ spec, firstCorrect, transferCorrect, mastery, onRestart }: { spec: ExperimentSpec; firstCorrect: boolean; transferCorrect: boolean; mastery: number; onRestart: () => void }) {
+function CompletePanel({
+  spec,
+  firstCorrect,
+  transferCorrect,
+  masteryStart,
+  firstMastery,
+  mastery,
+  firstConfidence,
+  transferConfidence,
+  firstEvidence,
+  transferEvidence,
+  transferChange,
+  onRestart,
+}: {
+  spec: ExperimentSpec;
+  firstCorrect: boolean;
+  transferCorrect: boolean;
+  masteryStart: number;
+  firstMastery: number;
+  mastery: number;
+  firstConfidence: number;
+  transferConfidence: number;
+  firstEvidence: SimulationEvidence | null;
+  transferEvidence: SimulationEvidence | null;
+  transferChange: ExperimentChange | null;
+  onRestart: () => void;
+}) {
+  const state = firstCorrect && transferCorrect
+    ? {
+        kicker: "MODEL TRANSFERRED",
+        heading: <>You predicted it.<br />Then transferred it.</>,
+        summary: "Both locked predictions matched the measured outcomes.",
+      }
+    : !firstCorrect && transferCorrect
+      ? {
+          kicker: "MENTAL MODEL REVISED",
+          heading: <>The evidence changed<br />your next prediction.</>,
+          summary: "Run 1 exposed the misconception, and Run 2 showed successful transfer.",
+        }
+      : {
+          kicker: "MODEL STILL EVOLVING",
+          heading: <>You tested it.<br />Now refine it.</>,
+          summary: "At least one measured outcome still disagrees with the current model.",
+        };
+  const heldConstant = spec.controls
+    .filter((control) => control.targetPath !== transferChange?.targetPath)
+    .map((control) => control.label)
+    .slice(0, 3);
+  const formatChangedValue = (value: number | string, unit: string) =>
+    `${value}${unit ? `${unit === "°" || unit === "%" ? "" : " "}${unit}` : ""}`;
+  const formattedChange = transferChange
+    ? `${transferChange.label}: ${formatChangedValue(transferChange.before ?? "baseline", transferChange.unit)} → ${formatChangedValue(transferChange.after, transferChange.unit)}`
+    : "One declared variable changed";
+
   return (
     <div className="panel-content complete-panel">
       <div className="completion-spark"><Sparkles size={24} /></div>
-      <p className="panel-kicker">MENTAL MODEL REVISED</p>
-      <h2>You didn’t memorize it.<br />You tested it.</h2>
+      <p className="panel-kicker">{state.kicker}</p>
+      <h2>{state.heading}</h2>
+      <p className="completion-summary">{state.summary}</p>
       <div className="mastery-card">
         <div><small>{spec.misconception.title}</small><strong>{mastery}%</strong></div>
         <div className="mastery-track"><span style={{ width: `${mastery}%` }} /></div>
-        <div className="mastery-events">
-          <span className={firstCorrect ? "correct" : "revised"}>{firstCorrect ? <Check size={12} /> : <RotateCcw size={12} />} First prediction</span>
-          <span className={transferCorrect ? "correct" : "revised"}>{transferCorrect ? <Check size={12} /> : <RotateCcw size={12} />} Transfer test</span>
+        <div className="mastery-trajectory" aria-label={`Mastery estimate changed from ${masteryStart}% to ${firstMastery}% after run 1 and ${mastery}% after run 2`}>
+          <span>START <b>{masteryStart}%</b></span>
+          <ArrowRight size={12} aria-hidden="true" />
+          <span>RUN 1 <b>{firstMastery}%</b></span>
+          <ArrowRight size={12} aria-hidden="true" />
+          <span>RUN 2 <b>{mastery}%</b></span>
         </div>
+        <div className="mastery-events">
+          <span className={firstCorrect ? "correct" : "revised"}>{firstCorrect ? <Check size={12} /> : <RotateCcw size={12} />} First prediction: {firstCorrect ? "correct" : "needs revision"}</span>
+          <span className={transferCorrect ? "correct" : "revised"}>{transferCorrect ? <Check size={12} /> : <RotateCcw size={12} />} Transfer test: {transferCorrect ? "correct" : "needs revision"}</span>
+        </div>
+        <p className="mastery-explanation">
+          This Bayesian estimate uses both locked predictions: matches raise the estimate; misses lower it and mark what to revisit.
+        </p>
       </div>
+      <section className="run-comparison" aria-labelledby="run-comparison-title">
+        <div>
+          <span>CONTROLLED COMPARISON</span>
+          <h3 id="run-comparison-title">Run 1 vs Run 2</h3>
+        </div>
+        <p className="comparison-change"><strong>Changed:</strong> {formattedChange}</p>
+        {heldConstant.length > 0 && (
+          <p className="comparison-controls"><strong>Held constant:</strong> {heldConstant.join(", ")}</p>
+        )}
+        <div className="comparison-runs">
+          <article>
+            <span>RUN 1 · {firstCorrect ? "MATCHED" : "MISSED"}</span>
+            <strong>{firstConfidence}% confident</strong>
+            {firstEvidence && (
+              <dl className="comparison-metrics">
+                <div><dt>{firstEvidence.metricA.label}</dt><dd>{firstEvidence.metricA.value}</dd></div>
+                <div><dt>{firstEvidence.metricB.label}</dt><dd>{firstEvidence.metricB.value}</dd></div>
+              </dl>
+            )}
+            <p>{firstEvidence?.summary ?? "Evidence was captured in the first run."}</p>
+          </article>
+          <article>
+            <span>RUN 2 · {transferCorrect ? "MATCHED" : "MISSED"}</span>
+            <strong>{transferConfidence}% confident</strong>
+            {transferEvidence && (
+              <dl className="comparison-metrics">
+                <div><dt>{transferEvidence.metricA.label}</dt><dd>{transferEvidence.metricA.value}</dd></div>
+                <div><dt>{transferEvidence.metricB.label}</dt><dd>{transferEvidence.metricB.value}</dd></div>
+              </dl>
+            )}
+            <p>{transferEvidence?.summary ?? "Evidence was captured in the transfer run."}</p>
+          </article>
+        </div>
+      </section>
       <blockquote>“What changed in your model of the world?”</blockquote>
-      <p className="complete-copy">The next time you meet this idea, you have evidence—not just an answer.</p>
+      <p className="complete-copy">The next time you meet this idea, you have measured evidence—not just an answer.</p>
       <button className="primary-panel-button" onClick={onRestart}>Build another world <ArrowRight size={16} /></button>
     </div>
   );
@@ -809,21 +1126,51 @@ function LabWorkspace({
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
   const [firstCorrect, setFirstCorrect] = useState(false);
   const [transferCorrect, setTransferCorrect] = useState(false);
+  const [confidence, setConfidence] = useState(62);
+  const [firstConfidence, setFirstConfidence] = useState(62);
+  const [transferConfidence, setTransferConfidence] = useState(50);
+  const [firstEvidence, setFirstEvidence] = useState<SimulationEvidence | null>(null);
+  const [transferChange, setTransferChange] = useState<ExperimentChange | null>(null);
   const [transferMode, setTransferMode] = useState(false);
   const [mastery, setMastery] = useState(25);
+  const [masteryStart, setMasteryStart] = useState(25);
+  const [firstMastery, setFirstMastery] = useState(25);
   const [simulationExpanded, setSimulationExpanded] = useState(false);
+  const [cameraCommand, setCameraCommand] = useState<CameraCommand>({
+    type: "reset",
+    token: 0,
+  });
   const preRunSpec = useRef(spec);
   const simulationStage = useRef<HTMLElement>(null);
+  const learningPanel = useRef<HTMLElement>(null);
+  const expandButton = useRef<HTMLButtonElement>(null);
+  const commandCamera = useCallback((type: CameraCommand["type"]) => {
+    setCameraCommand((current) => ({ type, token: current.token + 1 }));
+  }, []);
 
   useEffect(() => {
-    setMastery(
-      Math.round(masteryProbability(spec.misconception.id) * 100),
+    const storedMastery = Math.round(
+      masteryProbability(spec.misconception.id) * 100,
     );
+    setMastery(storedMastery);
+    setMasteryStart(storedMastery);
+    setFirstMastery(storedMastery);
   }, [spec.misconception.id]);
 
   useEffect(() => {
     if (!simulationExpanded) return;
     const previousOverflow = document.body.style.overflow;
+    const expandedViewButton = expandButton.current;
+    const backgroundElements = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        ".site-header, .lab-topline, .learning-panel, .lab-mastery-footer",
+      ),
+    );
+    const previousBackgroundState = backgroundElements.map((element) => ({
+      element,
+      ariaHidden: element.getAttribute("aria-hidden"),
+      inert: element.inert,
+    }));
     const handleExpandedKeyboard = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setSimulationExpanded(false);
@@ -847,18 +1194,63 @@ function LabWorkspace({
       }
     };
     document.body.style.overflow = "hidden";
+    backgroundElements.forEach((element) => {
+      element.inert = true;
+      element.setAttribute("aria-hidden", "true");
+    });
     window.addEventListener("keydown", handleExpandedKeyboard);
+    window.requestAnimationFrame(() => expandedViewButton?.focus());
     return () => {
       document.body.style.overflow = previousOverflow;
+      previousBackgroundState.forEach(({ element, ariaHidden, inert }) => {
+        element.inert = inert;
+        if (ariaHidden === null) element.removeAttribute("aria-hidden");
+        else element.setAttribute("aria-hidden", ariaHidden);
+      });
       window.removeEventListener("keydown", handleExpandedKeyboard);
+      window.requestAnimationFrame(() => expandedViewButton?.focus());
     };
   }, [simulationExpanded]);
+
+  useEffect(() => {
+    if (phase !== "explaining" || !evaluation) return;
+    const panel = learningPanel.current;
+    const notebook = panel?.querySelector<HTMLElement>(".notebook-scroll");
+    window.requestAnimationFrame(() => {
+      notebook?.scrollTo({ top: notebook.scrollHeight, behavior: "smooth" });
+    });
+    if (!panel || window.innerWidth > 1040) return;
+    const timeout = window.setTimeout(() => {
+      const top = panel.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo({ top: Math.max(0, top - 8), behavior: "auto" });
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [evaluation, phase]);
+
+  useEffect(() => {
+    const handleWorkspaceShortcuts = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (event.key === "0") {
+        event.preventDefault();
+        commandCamera("reset");
+      } else if (event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setSimulationExpanded((value) => !value);
+      }
+    };
+    window.addEventListener("keydown", handleWorkspaceShortcuts);
+    return () => window.removeEventListener("keydown", handleWorkspaceShortcuts);
+  }, [commandCamera]);
 
   const capturing = phase === "running" || phase === "counterfactual-running";
   const counterfactual = transferMode || phase === "counterfactual-predicting" || phase === "counterfactual-running";
   const chosen = spec.prediction.choices.find((choice) => choice.id === selected);
   const predictionLabel = chosen?.label ?? "an outcome that is still being tested";
   const canEditControls = !launched && phase === "predicting";
+  const reservedControlPath = canEditControls
+    ? spec.prediction.testChange?.targetPath
+    : undefined;
   const hasRun = launched || Boolean(evidence);
   const showOutcomeGuides =
     Boolean(evidence) &&
@@ -891,9 +1283,12 @@ function LabWorkspace({
               density: spec.scene.airDensity,
             }
           : { name: "Idealized lab", density: 0 };
+  const legendItems = sceneLegend(spec);
 
   const run = () => {
     if (!selected || capturing) return;
+    if (counterfactual) setTransferConfidence(confidence);
+    else setFirstConfidence(confidence);
     preRunSpec.current = spec;
     const testChange = spec.prediction.testChange;
     if (testChange) {
@@ -925,11 +1320,12 @@ function LabWorkspace({
       const correct = chosen?.outcomeKey === result.outcomeKey;
       if (phase === "running") {
         setFirstCorrect(correct);
-        setMastery(
-          Math.round(
-            recordMasteryObservation(spec.misconception.id, correct) * 100,
-          ),
+        setFirstEvidence(result);
+        const nextMastery = Math.round(
+          recordMasteryObservation(spec.misconception.id, correct) * 100,
         );
+        setFirstMastery(nextMastery);
+        setMastery(nextMastery);
         setPhase("evidence");
       } else if (phase === "counterfactual-running") {
         setTransferCorrect(correct);
@@ -993,11 +1389,20 @@ function LabWorkspace({
       setPhase("complete");
       return;
     }
-    const counterfactualSpec = applyCounterfactual(spec, next);
+    const baselineSpec = preRunSpec.current;
+    setTransferChange(
+      describeExperimentChange(
+        baselineSpec,
+        next.change.targetPath,
+        next.change.value,
+      ),
+    );
+    const counterfactualSpec = applyCounterfactual(baselineSpec, next);
     preRunSpec.current = counterfactualSpec;
     setSpec(counterfactualSpec);
     setTransferMode(true);
     setSelected(null);
+    setConfidence(50);
     setExplanation("");
     setEvidence(null);
     setLaunched(false);
@@ -1025,6 +1430,7 @@ function LabWorkspace({
     setPaused(false);
     setEvidence(null);
     setRunToken((value) => value + 1);
+    commandCamera("reset");
     setPhase(counterfactual ? "counterfactual-predicting" : "predicting");
   };
 
@@ -1034,6 +1440,16 @@ function LabWorkspace({
     setExplanation("");
     setEvaluation(null);
     setEvaluationOffline(false);
+    setEvaluationError(null);
+    if (!counterfactual) {
+      setFirstEvidence(null);
+      setFirstCorrect(false);
+      setFirstMastery(masteryStart);
+      setConfidence(62);
+    } else {
+      setTransferCorrect(false);
+      setConfidence(50);
+    }
   };
 
   const replay = () => {
@@ -1046,7 +1462,7 @@ function LabWorkspace({
   };
 
   return (
-    <main className="lab-workspace">
+    <main id="main-content" className="lab-workspace" tabIndex={-1}>
       <div className="lab-topline">
         <div className="lab-title-block">
           <div>
@@ -1056,6 +1472,11 @@ function LabWorkspace({
               <h2>{spec.title}</h2>
               <i aria-hidden="true" />
               <span>{counterfactual ? "Run 2 of 2" : "Run 1 of 2"}</span>
+              {compilerNotice && (
+                <span className="compiler-notice-mobile">
+                  <ShieldCheck size={11} aria-hidden="true" /> {compactCompilerNotice(compilerNotice)}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -1079,9 +1500,13 @@ function LabWorkspace({
           <div className="stage-toolbar">
             <div><span className="status-light" /> {capturing ? paused ? "SIMULATION PAUSED" : "SIMULATION RUNNING" : hasRun ? "EVIDENCE CAPTURED" : "WORLD READY"}</div>
             <div className="stage-tools">
-              <span>drag to inspect</span>
+              <span><Crosshair size={11} aria-hidden="true" /> drag to orbit · scroll to point · right-drag to pan</span>
+              <button type="button" title="Zoom in" aria-label="Zoom simulation in" onClick={() => commandCamera("zoom-in")}><ZoomIn size={14} /></button>
+              <button type="button" title="Zoom out" aria-label="Zoom simulation out" onClick={() => commandCamera("zoom-out")}><ZoomOut size={14} /></button>
+              <button type="button" title="Recenter view (0)" aria-label="Recenter simulation view" onClick={() => commandCamera("reset")}><Crosshair size={14} /></button>
               <button type="button" aria-label="Reset simulation" onClick={resetSimulation}><RotateCcw size={14} /></button>
               <button
+                ref={expandButton}
                 type="button"
                 aria-label={simulationExpanded ? "Exit expanded simulation view" : "Expand simulation view"}
                 aria-expanded={simulationExpanded}
@@ -1100,6 +1525,7 @@ function LabWorkspace({
                 capturing={capturing}
                 paused={paused}
                 showOutcomeGuides={showOutcomeGuides}
+                cameraCommand={cameraCommand}
                 onComplete={onComplete}
               />
             </SimulationErrorBoundary>
@@ -1113,6 +1539,18 @@ function LabWorkspace({
               <span><i>ρ</i> {environment.density.toFixed(3)} kg/m³</span>
             </div>
             <div className="canvas-vignette-copy"><p>{spec.sourceSummary}</p></div>
+            <div className="scene-legend" aria-label="Scientific measurement legend">
+              <small>MEASUREMENT KEY</small>
+              <div>
+                {legendItems.map((item) => (
+                  <span key={item.id}>
+                    <i style={{ background: item.color, color: item.color }} />
+                    {item.label}
+                  </span>
+                ))}
+              </div>
+              <b>Evidence sampled over time · SI units</b>
+            </div>
             {capturing && <div className="capture-badge"><span />{paused ? <Play size={12} /> : <Pause size={12} />} {paused ? "observation paused" : "collecting evidence"}</div>}
           </div>
           <div className="replay-bar" aria-label="Simulation playback controls">
@@ -1133,23 +1571,31 @@ function LabWorkspace({
           <div className="control-deck">
             <div className="control-heading"><span><CircleGauge size={15} /> CONTROLLED VARIABLES</span><small>{canEditControls ? "change one thing at a time" : counterfactual ? "locked for transfer test" : "locked for this run"}</small></div>
             <div className="controls-grid">
-              {spec.controls.map((control, index) => (
-                <div key={control.id} className={`variable-control variable-${index + 1}`}>
-                  <label htmlFor={`control-${control.id}`}>{control.label}</label>
-                  <div className="stepper-control">
-                    <button type="button" disabled={!canEditControls || control.value <= control.min} aria-label={`Decrease ${control.label}`} onClick={() => changeControl(control.id, control.value - control.step)}><Minus size={14} /></button>
-                    <output htmlFor={`control-${control.id}`}>{control.value.toFixed(precisionForStep(control.step))}</output>
-                    <button type="button" disabled={!canEditControls || control.value >= control.max} aria-label={`Increase ${control.label}`} onClick={() => changeControl(control.id, control.value + control.step)}><Plus size={14} /></button>
-                    <span>{control.unit}</span>
+              {spec.controls.map((control, index) => {
+                const reservedForRun = control.targetPath === reservedControlPath;
+                const disabled = !canEditControls || reservedForRun;
+                return (
+                  <div key={control.id} className={`variable-control variable-${index + 1} ${reservedForRun ? "reserved-control" : ""}`}>
+                    <label htmlFor={`control-${control.id}`}>
+                      {control.label}
+                      {reservedForRun && <small>tested in this run</small>}
+                    </label>
+                    <div className="stepper-control">
+                      <button type="button" disabled={disabled || control.value <= control.min} aria-label={`Decrease ${control.label}`} onClick={() => changeControl(control.id, control.value - control.step)}><Minus size={14} /></button>
+                      <output htmlFor={`control-${control.id}`}>{control.value.toFixed(precisionForStep(control.step))}</output>
+                      <button type="button" disabled={disabled || control.value >= control.max} aria-label={`Increase ${control.label}`} onClick={() => changeControl(control.id, control.value + control.step)}><Plus size={14} /></button>
+                      <span>{control.unit}</span>
+                    </div>
+                    <input id={`control-${control.id}`} type="range" min={control.min} max={control.max} step={control.step} value={control.value} disabled={disabled} aria-describedby={reservedForRun ? `reserved-${control.id}` : undefined} onChange={(event) => changeControl(control.id, Number(event.target.value))} />
+                    {reservedForRun && <span id={`reserved-${control.id}`} className="sr-only">This variable is locked because the prediction tests its displayed change.</span>}
                   </div>
-                  <input id={`control-${control.id}`} type="range" min={control.min} max={control.max} step={control.step} value={control.value} disabled={!canEditControls} onChange={(event) => changeControl(control.id, Number(event.target.value))} />
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </section>
 
-        <aside className="learning-panel">
+        <aside ref={learningPanel} className="learning-panel">
           <div className="notebook-header">
             <div><FlaskConical size={17} /><span>{phase === "predicting" || phase === "counterfactual-predicting" ? "HYPOTHESIS NOTEBOOK" : "EVIDENCE NOTEBOOK"}</span></div>
             <button type="button" onClick={clearRun}><RotateCcw size={13} /> Clear run</button>
@@ -1163,14 +1609,16 @@ function LabWorkspace({
                 onRun={run}
                 counterfactual={counterfactual}
                 running={capturing}
+                confidence={confidence}
+                setConfidence={setConfidence}
               />
             )}
-            {phase === "evidence" && evidence && <EvidencePanel spec={spec} evidence={evidence} predictionLabel={predictionLabel} explanation={explanation} setExplanation={setExplanation} onEvaluate={() => evaluate("ai")} onOfflineEvaluate={() => evaluate("offline")} evaluating={evaluating} evaluationError={evaluationError} />}
+            {phase === "evidence" && evidence && <EvidencePanel spec={spec} evidence={evidence} predictionLabel={predictionLabel} predictionConfidence={firstConfidence} predictionCorrect={firstCorrect} explanation={explanation} setExplanation={setExplanation} onEvaluate={() => evaluate("ai")} onOfflineEvaluate={() => evaluate("offline")} evaluating={evaluating} evaluationError={evaluationError} />}
             {phase === "explaining" && evaluation && evidence && <FeedbackPanel spec={spec} evidence={evidence} predictionLabel={predictionLabel} evaluation={evaluation} evaluationOffline={evaluationOffline} onChallenge={beginCounterfactual} />}
-            {phase === "complete" && <CompletePanel spec={spec} firstCorrect={firstCorrect} transferCorrect={transferCorrect} mastery={mastery} onRestart={onExit} />}
+            {phase === "complete" && <CompletePanel spec={spec} firstCorrect={firstCorrect} transferCorrect={transferCorrect} masteryStart={masteryStart} firstMastery={firstMastery} mastery={mastery} firstConfidence={firstConfidence} transferConfidence={transferConfidence} firstEvidence={firstEvidence} transferEvidence={evidence} transferChange={transferChange} onRestart={onExit} />}
           </div>
           {capturing && (
-            <div className="running-overlay">
+            <div className="running-overlay" role="status" aria-live="polite" aria-atomic="true">
               <Timer size={42} strokeWidth={1.2} aria-hidden="true" />
               <p>Reality is answering</p>
               <small>{paused ? "Observation paused" : "Measuring at 10 samples / second"}</small>
@@ -1202,6 +1650,7 @@ export function CounterfactualLab() {
   const [validatedExampleOffer, setValidatedExampleOffer] =
     useState<ValidatedExampleOffer | null>(null);
   const [spec, setSpec] = useState<ExperimentSpec>(dropDemo);
+  const [exitConfirmationOpen, setExitConfirmationOpen] = useState(false);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });
@@ -1217,6 +1666,7 @@ export function CounterfactualLab() {
   }, [phase]);
 
   const reset = () => {
+    setExitConfirmationOpen(false);
     setPhase("input");
     setError(null);
     setCompilerNotice(null);
@@ -1230,6 +1680,11 @@ export function CounterfactualLab() {
   const compile = async (promptOverride?: string) => {
     const requestedPrompt = promptOverride?.trim() || prompt.trim();
     if (promptOverride) setPrompt(promptOverride);
+    if (requestedPrompt.length > MAX_QUESTION_LENGTH) {
+      setError(`Keep the question to ${MAX_QUESTION_LENGTH} characters or fewer.`);
+      setPhase("input");
+      return;
+    }
     setError(null);
     setCompilerNotice(null);
     setValidatedExampleOffer(null);
@@ -1354,7 +1809,12 @@ export function CounterfactualLab() {
   const inLab = phase !== "input" && phase !== "compiling";
   return (
     <div className="app-shell">
-      <Header inLab={inLab} phase={phase} onExit={reset} />
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <Header
+        inLab={inLab}
+        phase={phase}
+        onExit={() => inLab ? setExitConfirmationOpen(true) : reset()}
+      />
       {phase === "input" && (
         <Landing
           prompt={prompt}
@@ -1386,6 +1846,11 @@ export function CounterfactualLab() {
           compilerNotice={compilerNotice}
         />
       )}
+      <ExitConfirmation
+        open={exitConfirmationOpen}
+        onCancel={() => setExitConfirmationOpen(false)}
+        onConfirm={reset}
+      />
     </div>
   );
 }
